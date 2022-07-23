@@ -52,6 +52,7 @@ var (
 
 // Key pem から生成した JWT パース用の鍵
 var KeyForJWTParse jwt.SignEncryptParseOption
+var Key any
 
 // 環境変数を取得する、なければデフォルト値を返す
 func getEnv(key string, defaultValue string) string {
@@ -249,7 +250,7 @@ func parseViewer(c echo.Context) (*Viewer, error) {
 	tokenStr := cookie.Value
 	token, err := jwt.Parse(
 		[]byte(tokenStr),
-		KeyForJWTParse,
+		jwt.WithKey(jwa.RS256, Key),
 	)
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusUnauthorized, fmt.Errorf("error jwt.Parse: %s", err.Error()))
@@ -1619,10 +1620,10 @@ func initializeHandler(c echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("error os.ReadFile: keyFilename=%s: %w", keyFilename, err)
 	}
-	k, _, err := jwk.DecodePEM(keysrc)
+	Key, _, err := jwk.DecodePEM(keysrc)
 	if err != nil {
 		return fmt.Errorf("error jwk.DecodePEM: %w", err)
 	}
-	KeyForJWTParse = jwt.WithKey(jwa.RS256, k)
+	KeyForJWTParse = jwt.WithKey(jwa.RS256, Key)
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
 }
