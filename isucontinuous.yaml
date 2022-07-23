@@ -8,7 +8,7 @@ setup:
 slack:
   default_channel_id: "C6FC55B6W"
 hosts:
-- host: isuports-1.t.isucon.dev
+- host: isuports-3.t.isucon.dev
   user: &user root
   key: &key /root/.ssh/id_rsa
   deploy: &deploy
@@ -43,13 +43,3 @@ hosts:
       cat "{{.Env.ACCESSLOG_PATH}}" | alp ltsv -r --sort sum -m "/api/player/player/\w+,/api/player/competition/\w+/ranking,/api/organizer/player/\w+/disqualified,/api/organizer/competition/\w+/score,/api/organizer/competition/\w+/finish" > /profile/{{.Git.Revision}}/accesslog;
       cat "{{.Env.SLOWLOG_PATH}}" | docker run -i --rm matsuu/pt-query-digest > /profile/{{.Git.Revision}}/slowlog;
 
-
-- host: isuports-3.t.isucon.dev
-  user: *user
-  key: *key
-  deploy: *deploy
-
-- host: isuports-2.t.isucon.dev
-  user: *user
-  key: *key
-  deploy: *deploy
