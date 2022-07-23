@@ -1542,16 +1542,16 @@ func organizerCompetitionsHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	//tenantDB, err := connectToTenantDB(v.tenantID)
-	tenantDB, err := adminDB.Beginx()
-	if err != nil {
-		return err
-	}
-	defer tenantDB.Rollback()
+	////tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := adminDB.Beginx()
+	//if err != nil {
+	//	return err
+	//}
+	//defer tenantDB.Rollback()
 
-	tenantDB.Commit()
+	//tenantDB.Commit()
 
-	return competitionsHandler(c, v, tenantDB)
+	return competitionsHandler(c, v, adminDB)
 }
 
 func competitionsHandler(c echo.Context, v *Viewer, tenantDB dbOrTx) error {
