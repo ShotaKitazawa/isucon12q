@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -862,7 +863,9 @@ func playerDisqualifiedHandler(c echo.Context) error {
 
 	playerID := c.Param("player_id")
 
-	playerDisqualifiedStream <- playerDisqualifiedData{v.tenantID, playerID, time.Now().Unix()}
+	playerDisqualifiedSliceMutex.Lock()
+	playerDisqualifiedSlice = append(playerDisqualifiedSlice, playerDisqualifiedData{v.tenantID, playerID, time.Now().Unix()})
+	playerDisqualifiedSliceMutex.Unlock()
 
 	p, err := retrievePlayer(ctx, tenantDB, playerID)
 	if err != nil {
@@ -884,15 +887,20 @@ func playerDisqualifiedHandler(c echo.Context) error {
 }
 
 var (
-	playerDisqualifiedStream chan playerDisqualifiedData
+	playerDisqualifiedSlice      []playerDisqualifiedData
+	playerDisqualifiedSliceMutex sync.RWMutex
 )
 
 func playerDisqualifiedGoroutine() {
 	tick := time.Tick(2 * time.Second)
-	var datas []playerDisqualifiedData
 	for {
 		select {
 		case <-tick:
+			playerDisqualifiedSliceMutex.Lock()
+			datas := playerDisqualifiedSlice
+			playerDisqualifiedSlice = []playerDisqualifiedData{}
+			playerDisqualifiedSliceMutex.Unlock()
+
 			for _, data := range datas {
 				tenantDB, err := connectToTenantDB(data.tenantId)
 				if err != nil {
@@ -909,9 +917,6 @@ func playerDisqualifiedGoroutine() {
 				}
 				tenantDB.Close()
 			}
-
-		case d := <-playerDisqualifiedStream:
-			datas = append(datas, d)
 		}
 	}
 }
