@@ -50,10 +50,6 @@ var (
 	sqliteDriverName = "sqlite3"
 )
 
-// Key pem から生成した JWT パース用の鍵
-var KeyForJWTParse jwt.SignEncryptParseOption
-var Key any
-
 // 環境変数を取得する、なければデフォルト値を返す
 func getEnv(key string, defaultValue string) string {
 	if val, ok := os.LookupEnv(key); ok {
@@ -238,6 +234,9 @@ type Viewer struct {
 	tenantID   int64
 }
 
+// Key pem から生成した JWT パース用の鍵
+var KeyForJWTParse jwt.SignEncryptParseOption
+
 // リクエストヘッダをパースしてViewerを返す
 func parseViewer(c echo.Context) (*Viewer, error) {
 	cookie, err := c.Request().Cookie(cookieName)
@@ -250,7 +249,7 @@ func parseViewer(c echo.Context) (*Viewer, error) {
 	tokenStr := cookie.Value
 	token, err := jwt.Parse(
 		[]byte(tokenStr),
-		jwt.WithKey(jwa.RS256, Key),
+		KeyForJWTParse,
 	)
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusUnauthorized, fmt.Errorf("error jwt.Parse: %s", err.Error()))
@@ -1620,10 +1619,10 @@ func initializeHandler(c echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("error os.ReadFile: keyFilename=%s: %w", keyFilename, err)
 	}
-	Key, _, err := jwk.DecodePEM(keysrc)
+	k, _, err := jwk.DecodePEM(keysrc)
 	if err != nil {
 		return fmt.Errorf("error jwk.DecodePEM: %w", err)
 	}
-	KeyForJWTParse = jwt.WithKey(jwa.RS256, Key)
+	KeyForJWTParse = jwt.WithKey(jwa.RS256, k)
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
 }
