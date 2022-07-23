@@ -838,12 +838,6 @@ type PlayerDisqualifiedHandlerResult struct {
 	Player PlayerDetail `json:"player"`
 }
 
-type playerDisqualifiedData struct {
-	tenantId  int64
-	playerId  string
-	updatedAt int64
-}
-
 // テナント管理者向けAPI
 // POST /api/organizer/player/:player_id/disqualified
 // 参加者を失格にする
@@ -887,13 +881,19 @@ func playerDisqualifiedHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
 }
 
+type playerDisqualifiedData struct {
+	tenantId  int64
+	playerId  string
+	updatedAt int64
+}
+
 var (
 	playerDisqualifiedSlice      []playerDisqualifiedData
 	playerDisqualifiedSliceMutex sync.RWMutex
 )
 
 func playerDisqualifiedGoroutine() {
-	tick := time.Tick(1 * time.Millisecond) // TODO: 調整する
+	tick := time.Tick(100 * time.Millisecond) // TODO: 調整する
 	for {
 		select {
 		case <-tick:
@@ -1029,7 +1029,7 @@ var (
 )
 
 func competitionFinishGoroutine() {
-	tick := time.Tick(1 * time.Millisecond)
+	tick := time.Tick(100 * time.Millisecond) // TODO: 調整する
 	for {
 		select {
 		case <-tick:
@@ -1038,6 +1038,7 @@ func competitionFinishGoroutine() {
 			competitionFinishSlice = []competitionFinishData{}
 			competitionFinishSliceMutex.Unlock()
 
+			// TODO: DB が1つになったら bulk insert する
 			for _, data := range datas {
 				tenantDB, err := connectToTenantDB(data.tenantId)
 				if err != nil {
