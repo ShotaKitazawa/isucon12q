@@ -137,6 +137,10 @@ func SetCacheControlPrivate(next echo.HandlerFunc) echo.HandlerFunc {
 func Run() {
 	go http.ListenAndServe(":6060", nil)
 
+	// goroutine の起動
+	go playerDisqualifiedGoroutine()
+	go competitionFinishGoroutine()
+
 	e := echo.New()
 	e.Debug = true
 	e.Logger.SetLevel(log.DEBUG)
@@ -195,10 +199,6 @@ func Run() {
 	}
 	adminDB.SetMaxOpenConns(1000)
 	defer adminDB.Close()
-
-	// goroutine の起動
-	go playerDisqualifiedGoroutine()
-	go competitionFinishGoroutine()
 
 	port := getEnv("SERVER_APP_PORT", "3000")
 	e.Logger.Infof("starting isuports server on : %s ...", port)
@@ -895,13 +895,14 @@ var (
 func playerDisqualifiedGoroutine() {
 	// debug code
 	for i := 0; i < 5; i++ {
-		time.Sleep(time.Millisecond)
+		fmt.Println("kanata debug code", i)
 		playerDisqualifiedSliceMutex.Lock()
 		datas := playerDisqualifiedSlice
 		playerDisqualifiedSlice = []playerDisqualifiedData{}
 		playerDisqualifiedSliceMutex.Unlock()
 		if !(len(playerDisqualifiedSlice) > 0) {
 			i--
+			time.Sleep(time.Millisecond)
 			continue
 		}
 
