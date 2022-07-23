@@ -996,7 +996,6 @@ func playerDisqualifiedGoroutine() {
 						true, data.updatedAt, data.playerId, err,
 					)
 				}
-				tenantDB.Close()
 			}
 		}
 	}
@@ -1161,7 +1160,6 @@ func competitionFinishGoroutine() {
 						data.updatedAt, data.updatedAt, data.competitionId, err,
 					)
 				}
-				tenantDB.Close()
 			}
 		}
 	}
