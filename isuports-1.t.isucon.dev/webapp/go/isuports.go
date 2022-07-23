@@ -85,25 +85,14 @@ func tenantDBName(id int64) string {
 	return fmt.Sprintf("tenant_%d", id)
 }
 
-var tenantDBMap = make(map[int64]*sqlx.DB)
-
 // テナントDBに接続する
 func connectToTenantDB(id int64) (*sqlx.Tx, error) {
-	v, ok := tenantDBMap[id]
-	if ok {
-		tx, err := v.Beginx()
-		if err != nil {
-			return nil, err
-		}
-		return tx, nil
-	}
 	dbname := tenantDBName(id)
-	vv, err := connectMySQL(dbname)
+	v, err := connectMySQL(dbname)
 	if err != nil {
 		return nil, err
 	}
-	tenantDBMap[id] = vv
-	tx, err := vv.Beginx()
+	tx, err := v.Beginx()
 	if err != nil {
 		return nil, err
 	}
@@ -240,9 +229,6 @@ func Run() {
 	}
 	adminDB.SetMaxOpenConns(1000)
 	defer adminDB.Close()
-	for _, v := range tenantDBMap {
-		v.Close()
-	}
 
 	port := getEnv("SERVER_APP_PORT", "3000")
 	e.Logger.Infof("starting isuports server on : %s ...", port)
@@ -716,7 +702,8 @@ func tenantsBillingHandler(c echo.Context) error {
 				Name:        t.Name,
 				DisplayName: t.DisplayName,
 			}
-			tenantDB, err := connectToTenantDB(t.ID)
+			//tenantDB, err := connectToTenantDB(t.ID)
+			tenantDB, err := adminDB.Beginx()
 			if err != nil {
 				return fmt.Errorf("failed to connectToTenantDB: %w", err)
 			}
@@ -780,7 +767,8 @@ func playersListHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return fmt.Errorf("error connectToTenantDB: %w", err)
 	}
@@ -828,7 +816,8 @@ func playersAddHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return err
 	}
@@ -893,7 +882,8 @@ func playerDisqualifiedHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return err
 	}
@@ -955,7 +945,8 @@ func competitionsAddHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return err
 	}
@@ -1004,7 +995,8 @@ func competitionFinishHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return err
 	}
@@ -1057,7 +1049,8 @@ func competitionScoreHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return err
 	}
@@ -1204,7 +1197,8 @@ func billingHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return err
 	}
@@ -1263,7 +1257,8 @@ func playerHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role player required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -1375,7 +1370,8 @@ func competitionRankingHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role player required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -1518,7 +1514,8 @@ func playerCompetitionsHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role player required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -1543,7 +1540,8 @@ func organizerCompetitionsHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return err
 	}
@@ -1636,7 +1634,8 @@ func meHandler(c echo.Context) error {
 		})
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return fmt.Errorf("error connectToTenantDB: %w", err)
 	}
