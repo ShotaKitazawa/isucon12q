@@ -99,7 +99,7 @@ func connectToTenantDB(id int64) (*sqlx.DB, error) {
 		return nil, err
 	}
 	tenantDBMap[id] = vv
-	return vv
+	return vv, nil
 }
 
 //func connectToTenantDB(id int64) (*sqlx.DB, error) {
