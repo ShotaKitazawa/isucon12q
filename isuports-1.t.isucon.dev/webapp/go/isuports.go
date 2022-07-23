@@ -858,27 +858,9 @@ func playerDisqualifiedHandler(c echo.Context) error {
 
 	playerID := c.Param("player_id")
 
-	if playerDisqualifiedHackeyCount < 5 {
-		playerDisqualifiedHackeyCountMutex.Lock()
-		playerDisqualifiedHackeyCount++
-		playerDisqualifiedHackeyCountMutex.Unlock()
-
-		now := time.Now().Unix()
-		if _, err := tenantDB.ExecContext(
-			ctx,
-			"UPDATE player SET is_disqualified = ?, updated_at = ? WHERE id = ?",
-			true, now, playerID,
-		); err != nil {
-			return fmt.Errorf(
-				"error Update player: isDisqualified=%t, updatedAt=%d, id=%s, %w",
-				true, now, playerID, err,
-			)
-		}
-	} else {
-		playerDisqualifiedSliceMutex.Lock()
-		playerDisqualifiedSlice = append(playerDisqualifiedSlice, playerDisqualifiedData{v.tenantID, playerID, time.Now().Unix()})
-		playerDisqualifiedSliceMutex.Unlock()
-	}
+	playerDisqualifiedSliceMutex.Lock()
+	playerDisqualifiedSlice = append(playerDisqualifiedSlice, playerDisqualifiedData{v.tenantID, playerID, time.Now().Unix()})
+	playerDisqualifiedSliceMutex.Unlock()
 
 	p, err := retrievePlayer(ctx, tenantDB, playerID)
 	if err != nil {
@@ -908,9 +890,6 @@ type playerDisqualifiedData struct {
 var (
 	playerDisqualifiedSlice      []playerDisqualifiedData
 	playerDisqualifiedSliceMutex sync.Mutex
-
-	playerDisqualifiedHackeyCount      int
-	playerDisqualifiedHackeyCountMutex sync.Mutex
 )
 
 func playerDisqualifiedGoroutine() {
@@ -1035,27 +1014,9 @@ func competitionFinishHandler(c echo.Context) error {
 		return fmt.Errorf("error retrieveCompetition: %w", err)
 	}
 
-	if competitionFinishHackeyCount < 5 {
-		competitionFinishHackeyCountMutex.Lock()
-		competitionFinishHackeyCount++
-		competitionFinishHackeyCountMutex.Unlock()
-
-		now := time.Now().Unix()
-		if _, err := tenantDB.ExecContext(
-			ctx,
-			"UPDATE competition SET finished_at = ?, updated_at = ? WHERE id = ?",
-			now, now, id,
-		); err != nil {
-			return fmt.Errorf(
-				"error Update competition: finishedAt=%d, updatedAt=%d, id=%s, %w",
-				now, now, id, err,
-			)
-		}
-	} else {
-		competitionFinishSliceMutex.Lock()
-		competitionFinishSlice = append(competitionFinishSlice, competitionFinishData{v.tenantID, id, time.Now().Unix()})
-		competitionFinishSliceMutex.Unlock()
-	}
+	competitionFinishSliceMutex.Lock()
+	competitionFinishSlice = append(competitionFinishSlice, competitionFinishData{v.tenantID, id, time.Now().Unix()})
+	competitionFinishSliceMutex.Unlock()
 
 	return c.JSON(http.StatusOK, SuccessResult{Status: true})
 }
