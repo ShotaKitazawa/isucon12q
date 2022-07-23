@@ -1703,9 +1703,12 @@ type InitializeHandlerResult struct {
 // ベンチマーカーが起動したときに最初に呼ぶ
 // データベースの初期化などが実行されるため、スキーマを変更した場合などは適宜改変すること
 func initializeHandler(c echo.Context) error {
-	out, err := exec.Command("../sql/init.sh").CombinedOutput()
+	out, err := exec.Command(initializeScript).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("error exec.Command: %s %e", string(out), err)
+	}
+	res := InitializeHandlerResult{
+		Lang: "go",
 	}
 	//eg, ctx := errgroup.WithContext(context.TODO())
 	//eg.Go(func() error {
@@ -1716,8 +1719,5 @@ func initializeHandler(c echo.Context) error {
 	//	return nil
 	//})
 
-	res := InitializeHandlerResult{
-		Lang: "go",
-	}
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
 }
