@@ -703,13 +703,14 @@ func tenantsBillingHandler(c echo.Context) error {
 				DisplayName: t.DisplayName,
 			}
 			//tenantDB, err := connectToTenantDB(t.ID)
-			tenantDB, err := adminDB.Beginx()
-			if err != nil {
-				return fmt.Errorf("failed to connectToTenantDB: %w", err)
-			}
-			defer tenantDB.Rollback()
+			//tenantDB, err := adminDB.Beginx()
+			//if err != nil {
+			//	return fmt.Errorf("failed to connectToTenantDB: %w", err)
+			//}
+			//defer tenantDB.Rollback()
+			//tenantDB = adminDB
 			cs := []CompetitionRow{}
-			if err := tenantDB.SelectContext(
+			if err := adminDB.SelectContext(
 				ctx,
 				&cs,
 				"SELECT * FROM competition WHERE tenant_id=?",
@@ -718,7 +719,7 @@ func tenantsBillingHandler(c echo.Context) error {
 				return fmt.Errorf("failed to Select competition: %w", err)
 			}
 			for _, comp := range cs {
-				report, err := billingReportByCompetition(ctx, tenantDB, t.ID, comp.ID)
+				report, err := billingReportByCompetition(ctx, adminDB, t.ID, comp.ID)
 				if err != nil {
 					return fmt.Errorf("failed to billingReportByCompetition: %w", err)
 				}
@@ -726,7 +727,7 @@ func tenantsBillingHandler(c echo.Context) error {
 			}
 			tenantBillings = append(tenantBillings, tb)
 
-			tenantDB.Commit()
+			//tenantDB.Commit()
 
 			return nil
 		}(t)
