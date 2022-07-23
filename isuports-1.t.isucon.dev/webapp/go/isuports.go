@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -366,18 +367,23 @@ type PlayerRow struct {
 }
 
 // 参加者を取得する
-func retrievePlayer(ctx context.Context, tenantDB dbOrTx, id string) (*PlayerRow, error) {
-	var p PlayerRow
-	if err := tenantDB.GetContext(ctx, &p, "SELECT * FROM player WHERE id = ?", id); err != nil {
-		return nil, fmt.Errorf("error Select player: id=%s, %w", id, err)
+func retrievePlayer(ctx context.Context, tenantDB dbOrTx, tenantID int64, id string) (*PlayerRow, error) {
+	tp, ok := Player.GetValue(tenantPlayerMapKey(tenantID, id))
+	if ok {
+		return &tp, nil
 	}
-	return &p, nil
+	return nil, sql.ErrNoRows
+	//var p PlayerRow
+	//if err := tenantDB.GetContext(ctx, &p, "SELECT * FROM player WHERE id = ?", id); err != nil {
+	//	return nil, fmt.Errorf("error Select player: id=%s, %w", id, err)
+	//}
+	//return &p, nil
 }
 
 // 参加者を認可する
 // 参加者向けAPIで呼ばれる
-func authorizePlayer(ctx context.Context, tenantDB dbOrTx, id string) error {
-	player, err := retrievePlayer(ctx, tenantDB, id)
+func authorizePlayer(ctx context.Context, tenantDB dbOrTx, tenantID int64, id string) error {
+	player, err := retrievePlayer(ctx, tenantDB, tenantID, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusUnauthorized, "player not found")
@@ -385,7 +391,7 @@ func authorizePlayer(ctx context.Context, tenantDB dbOrTx, id string) error {
 		return fmt.Errorf("error retrievePlayer from viewer: %w", err)
 	}
 	if player.IsDisqualified {
-		return echo.NewHTTPError(http.StatusForbidden, "player is disqualified")
+		return echo.NewHTTPError(http.StatusForbidden, "player is disqualified", id)
 	}
 	return nil
 }
@@ -728,7 +734,6 @@ type PlayersListHandlerResult struct {
 // GET /api/organizer/players
 // 参加者一覧を返す
 func playersListHandler(c echo.Context) error {
-	ctx := context.Background()
 	v, err := parseViewer(c)
 	if err != nil {
 		return err
@@ -742,26 +747,36 @@ func playersListHandler(c echo.Context) error {
 	}
 	defer tenantDB.Close()
 
-	var pls []PlayerRow
-	if err := tenantDB.SelectContext(
-		ctx,
-		&pls,
-		"SELECT * FROM player WHERE tenant_id=? ORDER BY created_at DESC",
-		v.tenantID,
-	); err != nil {
-		return fmt.Errorf("error Select player: %w", err)
+	ps := make([]PlayerDetail, 0)
+	for _, p := range Player.Player {
+		if p.TenantID == v.tenantID {
+			ps = append(ps, PlayerDetail{
+				ID:             p.ID,
+				DisplayName:    p.DisplayName,
+				IsDisqualified: p.IsDisqualified,
+			})
+		}
 	}
-	var pds []PlayerDetail
-	for _, p := range pls {
-		pds = append(pds, PlayerDetail{
-			ID:             p.ID,
-			DisplayName:    p.DisplayName,
-			IsDisqualified: p.IsDisqualified,
-		})
-	}
+	//var pls []PlayerRow
+	//if err := tenantDB.SelectContext(
+	//	ctx,
+	//	&pls,
+	//	"SELECT * FROM player WHERE tenant_id=? ORDER BY created_at DESC",
+	//	v.tenantID,
+	//); err != nil {
+	//	return fmt.Errorf("error Select player: %w", err)
+	//}
+	//var pds []PlayerDetail
+	//for _, p := range pls {
+	//	pds = append(pds, PlayerDetail{
+	//		ID:             p.ID,
+	//		DisplayName:    p.DisplayName,
+	//		IsDisqualified: p.IsDisqualified,
+	//	})
+	//}
 
 	res := PlayersListHandlerResult{
-		Players: pds,
+		Players: ps,
 	}
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
 }
@@ -795,34 +810,43 @@ func playersAddHandler(c echo.Context) error {
 	displayNames := params["display_name[]"]
 
 	pds := make([]PlayerDetail, 0, len(displayNames))
+	ps := make([]PlayerRow, 0, len(displayNames))
 	for _, displayName := range displayNames {
 		id, err := dispenseID(ctx)
 		if err != nil {
 			return fmt.Errorf("error dispenseID: %w", err)
 		}
-
+		//if _, err := tenantDB.ExecContext(
+		//	ctx,
+		//	"INSERT INTO player (id, tenant_id, display_name, is_disqualified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+		//	id, v.tenantID, displayName, false, now, now,
+		//); err != nil {
+		//	return fmt.Errorf(
+		//		"error Insert player at tenantDB: id=%s, displayName=%s, isDisqualified=%t, createdAt=%d, updatedAt=%d, %w",
+		//		id, displayName, false, now, now, err,
+		//	)
+		//}
+		//p, err := retrievePlayer(ctx, tenantDB, id)
+		//if err != nil {
+		//	return fmt.Errorf("error retrievePlayer: %w", err)
+		//}
 		now := time.Now().Unix()
-		// TODO: bulk insert ?
-		if _, err := tenantDB.ExecContext(
-			ctx,
-			"INSERT INTO player (id, tenant_id, display_name, is_disqualified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-			id, v.tenantID, displayName, false, now, now,
-		); err != nil {
-			return fmt.Errorf(
-				"error Insert player at tenantDB: id=%s, displayName=%s, isDisqualified=%t, createdAt=%d, updatedAt=%d, %w",
-				id, displayName, false, now, now, err,
-			)
-		}
-		p, err := retrievePlayer(ctx, tenantDB, id)
-		if err != nil {
-			return fmt.Errorf("error retrievePlayer: %w", err)
-		}
 		pds = append(pds, PlayerDetail{
-			ID:             p.ID,
-			DisplayName:    p.DisplayName,
-			IsDisqualified: p.IsDisqualified,
+			ID:             id,
+			DisplayName:    displayName,
+			IsDisqualified: false,
+		})
+		ps = append(ps, PlayerRow{
+			TenantID:       v.tenantID,
+			ID:             id,
+			DisplayName:    displayName,
+			IsDisqualified: false,
+			CreatedAt:      now,
+			UpdatedAt:      now,
 		})
 	}
+
+	Player.SetMultiValue(v.tenantID, ps)
 
 	res := PlayersAddHandlerResult{
 		Players: pds,
@@ -838,7 +862,6 @@ type PlayerDisqualifiedHandlerResult struct {
 // POST /api/organizer/player/:player_id/disqualified
 // 参加者を失格にする
 func playerDisqualifiedHandler(c echo.Context) error {
-	ctx := context.Background()
 	v, err := parseViewer(c)
 	if err != nil {
 		return fmt.Errorf("error parseViewer: %w", err)
@@ -855,30 +878,42 @@ func playerDisqualifiedHandler(c echo.Context) error {
 	playerID := c.Param("player_id")
 
 	now := time.Now().Unix()
-	if _, err := tenantDB.ExecContext(
-		ctx,
-		"UPDATE player SET is_disqualified = ?, updated_at = ? WHERE id = ?",
-		true, now, playerID,
-	); err != nil {
-		return fmt.Errorf(
-			"error Update player: isDisqualified=%t, updatedAt=%d, id=%s, %w",
-			true, now, playerID, err,
-		)
+	p, ok := Player.GetValue(tenantPlayerMapKey(v.tenantID, playerID))
+	if !ok {
+		return echo.NewHTTPError(http.StatusNotFound, "player not found")
 	}
-	p, err := retrievePlayer(ctx, tenantDB, playerID)
-	if err != nil {
-		// 存在しないプレイヤー
-		if errors.Is(err, sql.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "player not found")
-		}
-		return fmt.Errorf("error retrievePlayer: %w", err)
-	}
+	Player.SetValue(tenantPlayerMapKey(v.tenantID, playerID), PlayerRow{
+		TenantID:       p.TenantID,
+		ID:             p.ID,
+		DisplayName:    p.DisplayName,
+		IsDisqualified: true,
+		CreatedAt:      p.CreatedAt,
+		UpdatedAt:      now,
+	})
+	//if _, err := tenantDB.ExecContext(
+	//	ctx,
+	//	"UPDATE player SET is_disqualified = ?, updated_at = ? WHERE id = ?",
+	//	true, now, playerID,
+	//); err != nil {
+	//	return fmt.Errorf(
+	//		"error Update player: isDisqualified=%t, updatedAt=%d, id=%s, %w",
+	//		true, now, playerID, err,
+	//	)
+	//}
+	//p, err := retrievePlayer(ctx, tenantDB, playerID)
+	//if err != nil {
+	//	// 存在しないプレイヤー
+	//	if errors.Is(err, sql.ErrNoRows) {
+	//		return echo.NewHTTPError(http.StatusNotFound, "player not found")
+	//	}
+	//	return fmt.Errorf("error retrievePlayer: %w", err)
+	//}
 
 	res := PlayerDisqualifiedHandlerResult{
 		Player: PlayerDetail{
 			ID:             p.ID,
 			DisplayName:    p.DisplayName,
-			IsDisqualified: p.IsDisqualified,
+			IsDisqualified: true,
 		},
 	}
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
@@ -1071,7 +1106,7 @@ func competitionScoreHandler(c echo.Context) error {
 		playerID, scoreStr := row[0], row[1]
 		// TODO: N+1
 		// CSV 読み込んでから where in とかで取得でいけそう？
-		if _, err := retrievePlayer(ctx, tenantDB, playerID); err != nil {
+		if _, err := retrievePlayer(ctx, tenantDB, v.tenantID, playerID); err != nil {
 			// 存在しない参加者が含まれている
 			if errors.Is(err, sql.ErrNoRows) {
 				return echo.NewHTTPError(
@@ -1158,6 +1193,7 @@ func billingHandler(c echo.Context) error {
 	defer tenantDB.Close()
 
 	cs := []CompetitionRow{}
+	// MEMO: tenant id の大会を取得
 	if err := tenantDB.SelectContext(
 		ctx,
 		&cs,
@@ -1215,7 +1251,7 @@ func playerHandler(c echo.Context) error {
 	}
 	defer tenantDB.Close()
 
-	if err := authorizePlayer(ctx, tenantDB, v.playerID); err != nil {
+	if err := authorizePlayer(ctx, tenantDB, v.tenantID, v.playerID); err != nil {
 		return err
 	}
 
@@ -1223,7 +1259,7 @@ func playerHandler(c echo.Context) error {
 	if playerID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "player_id is required")
 	}
-	p, err := retrievePlayer(ctx, tenantDB, playerID)
+	p, err := retrievePlayer(ctx, tenantDB, v.tenantID, playerID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "player not found")
@@ -1325,7 +1361,7 @@ func competitionRankingHandler(c echo.Context) error {
 	}
 	defer tenantDB.Close()
 
-	if err := authorizePlayer(ctx, tenantDB, v.playerID); err != nil {
+	if err := authorizePlayer(ctx, tenantDB, v.tenantID, v.playerID); err != nil {
 		return err
 	}
 
@@ -1393,7 +1429,7 @@ func competitionRankingHandler(c echo.Context) error {
 			continue
 		}
 		scoredPlayerSet[ps.PlayerID] = struct{}{}
-		p, err := retrievePlayer(ctx, tenantDB, ps.PlayerID)
+		p, err := retrievePlayer(ctx, tenantDB, v.tenantID, ps.PlayerID)
 		if err != nil {
 			return fmt.Errorf("error retrievePlayer: %w", err)
 		}
@@ -1464,7 +1500,7 @@ func playerCompetitionsHandler(c echo.Context) error {
 	}
 	defer tenantDB.Close()
 
-	if err := authorizePlayer(ctx, tenantDB, v.playerID); err != nil {
+	if err := authorizePlayer(ctx, tenantDB, v.tenantID, v.playerID); err != nil {
 		return err
 	}
 	return competitionsHandler(c, v, tenantDB)
@@ -1578,7 +1614,7 @@ func meHandler(c echo.Context) error {
 		return fmt.Errorf("error connectToTenantDB: %w", err)
 	}
 	ctx := context.Background()
-	p, err := retrievePlayer(ctx, tenantDB, v.playerID)
+	p, err := retrievePlayer(ctx, tenantDB, v.tenantID, v.playerID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return c.JSON(http.StatusOK, SuccessResult{
@@ -1638,5 +1674,69 @@ func initializeHandler(c echo.Context) error {
 		return fmt.Errorf("error jwk.DecodePEM: %w", err)
 	}
 	KeyForJWTParse = jwt.WithKey(jwa.RS256, k)
+	pm := make(map[string]PlayerRow, 10000)
+	Player = PlayerMap{
+		Player: pm,
+	}
+	ctx := context.Background()
+	for i := int64(1); i <= initTenantMaxID; i++ {
+		err := func() error {
+			tenantDB, err := connectToTenantDB(i)
+			if err != nil {
+				return err
+			}
+			defer tenantDB.Close()
+			ps := []PlayerRow{}
+			err = tenantDB.SelectContext(
+				ctx,
+				&ps,
+				"SELECT * FROM player ",
+			)
+			if err != nil {
+				return fmt.Errorf("error Select player: %w", err)
+			}
+			for _, p := range ps {
+				k := tenantPlayerMapKey(i, p.ID)
+				Player.SetValue(k, p)
+			}
+			return nil
+		}()
+		if err != nil {
+			return fmt.Errorf("error player map append %w", err)
+		}
+	}
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
+}
+
+var initTenantMaxID int64 = 100
+
+type PlayerMap struct {
+	mux    sync.RWMutex
+	Player map[string]PlayerRow
+}
+
+func (m *PlayerMap) GetValue(key string) (PlayerRow, bool) {
+	m.mux.RLock()
+	defer m.mux.RUnlock()
+	p, ok := m.Player[key]
+	return p, ok
+}
+func (m *PlayerMap) SetValue(key string, value PlayerRow) {
+	m.mux.Lock()
+	defer m.mux.Unlock()
+	m.Player[key] = value
+}
+
+func (m *PlayerMap) SetMultiValue(tenantID int64, value []PlayerRow) {
+	m.mux.Lock()
+	defer m.mux.Unlock()
+	for _, p := range value {
+		m.Player[tenantPlayerMapKey(tenantID, p.ID)] = p
+	}
+}
+
+var Player PlayerMap
+
+func tenantPlayerMapKey(tID int64, pID string) string {
+	return strconv.Itoa(int(tID)) + ":" + pID
 }
