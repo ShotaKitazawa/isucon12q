@@ -17,7 +17,7 @@ hosts:
       rm -f "{{.Env.ACCESSLOG_PATH}}";
       rm -f "{{.Env.SLOWLOG_PATH}}";
     post_command: >-
-      sudo systemctl restart mysql nginx && sudo systemctl restart isuports.service
+      sudo systemctl restart mysql nginx && sudo systemctl restart isuports.go.service
     targets:
     - src: nginx
       target: /etc/nginx
