@@ -44,12 +44,12 @@ hosts:
       cat "{{.Env.SLOWLOG_PATH}}" | docker run -i --rm matsuu/pt-query-digest > /profile/{{.Git.Revision}}/slowlog;
 
 
-- host: isuports-3.t.isucon.dev
-  user: *user
-  key: *key
-  deploy: *deploy
-
-- host: isuports-2.t.isucon.dev
-  user: *user
-  key: *key
-  deploy: *deploy
+#- host: isuports-3.t.isucon.dev
+#  user: *user
+#  key: *key
+#  deploy: *deploy
+#
+#- host: isuports-2.t.isucon.dev
+#  user: *user
+#  key: *key
+#  deploy: *deploy
