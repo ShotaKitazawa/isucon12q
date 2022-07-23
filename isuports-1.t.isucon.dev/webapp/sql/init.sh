@@ -31,14 +31,22 @@ mysql -u"$ISUCON_DB_USER" \
 #                --host "$ISUCON_DB_HOST" \
 #                --port "$ISUCON_DB_PORT" < /home/isucon/tenant.dmp
 
+for i in competition.sql player.sql player_score.sql;do mysql -uisucon -pisucon isuports < "/home/isucon/webapp/sql/$i"; done
+
 # add/remove index
 mysql -u"$ISUCON_DB_USER" -p"$ISUCON_DB_PASSWORD" --host "$ISUCON_DB_HOST" --port "$ISUCON_DB_PORT" "$ISUCON_DB_NAME" \
   -e 'ALTER TABLE visit_history ADD INDEX tenant_competition_player (tenant_id,competition_id,player_id);'
 
 mysql -u"$ISUCON_DB_USER" -p"$ISUCON_DB_PASSWORD" --host "$ISUCON_DB_HOST" --port "$ISUCON_DB_PORT" "$ISUCON_DB_NAME" \
-  -e 'DROP INDEX tenant_id_idx ON visit_history;'
+  -e 'ALTER TABLE competition ADD INDEX a (tenant_id);'
+mysql -u"$ISUCON_DB_USER" -p"$ISUCON_DB_PASSWORD" --host "$ISUCON_DB_HOST" --port "$ISUCON_DB_PORT" "$ISUCON_DB_NAME" \
+  -e 'ALTER TABLE player_score ADD INDEX b (tenant_id,competition_id);'
+mysql -u"$ISUCON_DB_USER" -p"$ISUCON_DB_PASSWORD" --host "$ISUCON_DB_HOST" --port "$ISUCON_DB_PORT" "$ISUCON_DB_NAME" \
+  -e 'ALTER TABLE player_score ADD INDEX c (tenant_id,competition_id,player_id);'
 
+#mysql -u"$ISUCON_DB_USER" -p"$ISUCON_DB_PASSWORD" --host "$ISUCON_DB_HOST" --port "$ISUCON_DB_PORT" "$ISUCON_DB_NAME" \
+#  -e 'DROP INDEX tenant_id_idx ON visit_history;'
 
 # SQLiteのデータベースを初期化
-rm -f ../tenant_db/*.db
+#rm -f ../tenant_db/*.db
 #cp -r ../../initial_data/*.db ../tenant_db/
