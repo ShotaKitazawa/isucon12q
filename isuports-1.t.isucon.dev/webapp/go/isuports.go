@@ -893,6 +893,37 @@ var (
 )
 
 func playerDisqualifiedGoroutine() {
+	// debug code
+	for i := 0; i < 5; i++ {
+		time.Sleep(time.Millisecond)
+		playerDisqualifiedSliceMutex.Lock()
+		datas := playerDisqualifiedSlice
+		playerDisqualifiedSlice = []playerDisqualifiedData{}
+		playerDisqualifiedSliceMutex.Unlock()
+		if !(len(playerDisqualifiedSlice) > 0) {
+			i--
+			continue
+		}
+
+		for _, data := range datas {
+
+			tenantDB, err := connectToTenantDB(data.tenantId)
+			if err != nil {
+				fmt.Printf("playerDisqualifiedGoroutine: %v\n", err)
+			}
+			if _, err := tenantDB.Exec(
+				"UPDATE player SET is_disqualified = ?, updated_at = ? WHERE id = ?",
+				true, data.updatedAt, data.playerId,
+			); err != nil {
+				fmt.Printf("playerDisqualifiedGoroutine: "+
+					"error Update player: isDisqualified=%t, updatedAt=%d, id=%s, %v\n",
+					true, data.updatedAt, data.playerId, err,
+				)
+			}
+			tenantDB.Close()
+		}
+	}
+
 	tick := time.Tick(150 * time.Millisecond) // TODO: 調整する
 	for {
 		select {
