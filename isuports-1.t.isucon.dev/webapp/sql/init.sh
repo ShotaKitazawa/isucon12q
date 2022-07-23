@@ -9,10 +9,6 @@ ISUCON_DB_USER=${ISUCON_DB_USER:-isucon}
 ISUCON_DB_PASSWORD=${ISUCON_DB_PASSWORD:-isucon}
 ISUCON_DB_NAME=${ISUCON_DB_NAME:-isuports}
 
-ALTER TABLE competition ADD INDEX a (tenant_id);
-ALTER TABLE player_score ADD INDEX b (tenant_id,competition_id);
-ALTER TABLE player_score ADD INDEX c (tenant_id,competition_id,player_id);
-
 mysql -u"$ISUCON_DB_USER" -p"$ISUCON_DB_PASSWORD" --host "$ISUCON_DB_HOST" --port "$ISUCON_DB_PORT" "$ISUCON_DB_NAME" \
   -e 'ALTER TABLE competition ADD INDEX a (tenant_id);'
 
