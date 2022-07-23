@@ -906,6 +906,7 @@ func playerDisqualifiedGoroutine() {
 		}
 
 		for _, data := range datas {
+			fmt.Printf("(kanata) tenantId: %d, playerId: %s\n", data.tenantId, data.playerId)
 
 			tenantDB, err := connectToTenantDB(data.tenantId)
 			if err != nil {
