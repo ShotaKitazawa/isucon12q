@@ -1064,18 +1064,11 @@ func competitionScoreHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	//tenantDB, err := connectToTenantDB(v.tenantID)
-	tenantDB, err := adminDB.Beginx()
-	if err != nil {
-		return err
-	}
-	defer tenantDB.Rollback()
-
 	competitionID := c.Param("competition_id")
 	if competitionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "competition_id required")
 	}
-	comp, err := retrieveCompetition(ctx, tenantDB, competitionID)
+	comp, err := retrieveCompetition(ctx, adminDB, competitionID)
 	if err != nil {
 		// 存在しない大会
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1109,6 +1102,13 @@ func competitionScoreHandler(c echo.Context) error {
 	if !reflect.DeepEqual(headers, []string{"player_id", "score"}) {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid CSV headers")
 	}
+
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tenantDB.Rollback()
 
 	//// / DELETEしたタイミングで参照が来ると空っぽのランキングになるのでロックする
 	//fl, err := flockByTenantID(v.tenantID)
