@@ -172,13 +172,25 @@ func SetCacheControlPrivate(next echo.HandlerFunc) echo.HandlerFunc {
 func Run() {
 	go http.ListenAndServe(":6060", nil)
 
+	// pem から JWT パース用の鍵をアプリケーションで持つ.
+	// initialize の時間がかかるようならローカルからファイル読み込みしないようにする.
+	keyFilename := getEnv("ISUCON_JWT_KEY_FILE", "../public.pem")
+	keysrc, err := os.ReadFile(keyFilename)
+	if err != nil {
+		panic(err)
+	}
+	k, _, err := jwk.DecodePEM(keysrc)
+	if err != nil {
+		panic(err)
+	}
+	KeyForJWTParse = jwt.WithKey(jwa.RS256, k)
+
 	e := echo.New()
 	e.Debug = true
 	e.Logger.SetLevel(log.DEBUG)
 
 	var (
 		sqlLogger io.Closer
-		err       error
 	)
 	// sqliteのクエリログを出力する設定
 	// 環境変数 ISUCON_SQLITE_TRACE_FILE を設定すると、そのファイルにクエリログをJSON形式で出力する
@@ -1692,18 +1704,5 @@ func initializeHandler(c echo.Context) error {
 	res := InitializeHandlerResult{
 		Lang: "go",
 	}
-
-	// pem から JWT パース用の鍵をアプリケーションで持つ.
-	// initialize の時間がかかるようならローカルからファイル読み込みしないようにする.
-	keyFilename := getEnv("ISUCON_JWT_KEY_FILE", "../public.pem")
-	keysrc, err := os.ReadFile(keyFilename)
-	if err != nil {
-		return fmt.Errorf("error os.ReadFile: keyFilename=%s: %w", keyFilename, err)
-	}
-	k, _, err := jwk.DecodePEM(keysrc)
-	if err != nil {
-		return fmt.Errorf("error jwk.DecodePEM: %w", err)
-	}
-	KeyForJWTParse = jwt.WithKey(jwa.RS256, k)
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
 }
