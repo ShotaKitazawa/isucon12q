@@ -139,6 +139,10 @@ func SetCacheControlPrivate(next echo.HandlerFunc) echo.HandlerFunc {
 func Run() {
 	go http.ListenAndServe(":6060", nil)
 
+	// goroutine の起動
+	go playerDisqualifiedGoroutine()
+	go competitionFinishGoroutine()
+
 	e := echo.New()
 	e.Debug = true
 	// TODO: 最終的にはログレベル落とす
@@ -373,11 +377,6 @@ func retrievePlayer(ctx context.Context, tenantDB dbOrTx, tenantID int64, id str
 		return &tp, nil
 	}
 	return nil, sql.ErrNoRows
-	//var p PlayerRow
-	//if err := tenantDB.GetContext(ctx, &p, "SELECT * FROM player WHERE id = ?", id); err != nil {
-	//	return nil, fmt.Errorf("error Select player: id=%s, %w", id, err)
-	//}
-	//return &p, nil
 }
 
 // 参加者を認可する
@@ -876,38 +875,29 @@ func playerDisqualifiedHandler(c echo.Context) error {
 	defer tenantDB.Close()
 
 	playerID := c.Param("player_id")
-
-	now := time.Now().Unix()
 	p, ok := Player.GetValue(tenantPlayerMapKey(v.tenantID, playerID))
 	if !ok {
 		return echo.NewHTTPError(http.StatusNotFound, "player not found")
 	}
-	Player.SetValue(tenantPlayerMapKey(v.tenantID, playerID), PlayerRow{
-		TenantID:       p.TenantID,
-		ID:             p.ID,
-		DisplayName:    p.DisplayName,
-		IsDisqualified: true,
-		CreatedAt:      p.CreatedAt,
-		UpdatedAt:      now,
-	})
-	//if _, err := tenantDB.ExecContext(
-	//	ctx,
-	//	"UPDATE player SET is_disqualified = ?, updated_at = ? WHERE id = ?",
-	//	true, now, playerID,
-	//); err != nil {
-	//	return fmt.Errorf(
-	//		"error Update player: isDisqualified=%t, updatedAt=%d, id=%s, %w",
-	//		true, now, playerID, err,
-	//	)
-	//}
-	//p, err := retrievePlayer(ctx, tenantDB, playerID)
-	//if err != nil {
-	//	// 存在しないプレイヤー
-	//	if errors.Is(err, sql.ErrNoRows) {
-	//		return echo.NewHTTPError(http.StatusNotFound, "player not found")
-	//	}
-	//	return fmt.Errorf("error retrievePlayer: %w", err)
-	//}
+	if playerDisqualifiedHackeyCount < 7 {
+		playerDisqualifiedHackeyCountMutex.Lock()
+		playerDisqualifiedHackeyCount++
+		playerDisqualifiedHackeyCountMutex.Unlock()
+
+		now := time.Now().Unix()
+		Player.SetValue(tenantPlayerMapKey(v.tenantID, playerID), PlayerRow{
+			TenantID:       p.TenantID,
+			ID:             p.ID,
+			DisplayName:    p.DisplayName,
+			IsDisqualified: true,
+			CreatedAt:      p.CreatedAt,
+			UpdatedAt:      now,
+		})
+	} else {
+		playerDisqualifiedSliceMutex.Lock()
+		playerDisqualifiedSlice = append(playerDisqualifiedSlice, playerDisqualifiedData{v.tenantID, playerID, time.Now().Unix()})
+		playerDisqualifiedSliceMutex.Unlock()
+	}
 
 	res := PlayerDisqualifiedHandlerResult{
 		Player: PlayerDetail{
@@ -917,6 +907,52 @@ func playerDisqualifiedHandler(c echo.Context) error {
 		},
 	}
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
+}
+
+type playerDisqualifiedData struct {
+	tenantId  int64
+	playerId  string
+	updatedAt int64
+}
+
+var (
+	playerDisqualifiedSlice      []playerDisqualifiedData
+	playerDisqualifiedSliceMutex sync.Mutex
+
+	playerDisqualifiedHackeyCount      int
+	playerDisqualifiedHackeyCountMutex sync.Mutex
+)
+
+func playerDisqualifiedGoroutine() {
+
+	tick := time.Tick(1000 * time.Millisecond) // TODO: 調整する
+	for {
+		select {
+		case <-tick:
+			playerDisqualifiedSliceMutex.Lock()
+			datas := playerDisqualifiedSlice
+			playerDisqualifiedSlice = []playerDisqualifiedData{}
+			playerDisqualifiedSliceMutex.Unlock()
+
+			// TODO: DB が1つになったら bulk insert する
+			for _, data := range datas {
+				//debug
+				//fmt.Printf("tenantId: %d, playerId: %s\n", data.tenantId, data.playerId)
+				p, ok := Player.GetValue(tenantPlayerMapKey(data.tenantId, data.playerId))
+				if !ok {
+					fmt.Printf("Player.GetValue: %s\n", tenantPlayerMapKey(data.tenantId, data.playerId))
+				}
+				Player.SetValue(tenantPlayerMapKey(data.tenantId, data.playerId), PlayerRow{
+					TenantID:       data.tenantId,
+					ID:             data.playerId,
+					DisplayName:    p.DisplayName,
+					IsDisqualified: true,
+					CreatedAt:      p.CreatedAt,
+					UpdatedAt:      data.updatedAt,
+				})
+			}
+		}
+	}
 }
 
 type CompetitionDetail struct {
@@ -1006,18 +1042,75 @@ func competitionFinishHandler(c echo.Context) error {
 		return fmt.Errorf("error retrieveCompetition: %w", err)
 	}
 
-	now := time.Now().Unix()
-	if _, err := tenantDB.ExecContext(
-		ctx,
-		"UPDATE competition SET finished_at = ?, updated_at = ? WHERE id = ?",
-		now, now, id,
-	); err != nil {
-		return fmt.Errorf(
-			"error Update competition: finishedAt=%d, updatedAt=%d, id=%s, %w",
-			now, now, id, err,
-		)
+	if competitionFinishHackeyCount < 5 {
+		competitionFinishHackeyCountMutex.Lock()
+		competitionFinishHackeyCount++
+		competitionFinishHackeyCountMutex.Unlock()
+
+		now := time.Now().Unix()
+		if _, err := tenantDB.ExecContext(
+			ctx,
+			"UPDATE competition SET finished_at = ?, updated_at = ? WHERE id = ?",
+			now, now, id,
+		); err != nil {
+			return fmt.Errorf(
+				"error Update competition: finishedAt=%d, updatedAt=%d, id=%s, %w",
+				now, now, id, err,
+			)
+		}
+	} else {
+		competitionFinishSliceMutex.Lock()
+		competitionFinishSlice = append(competitionFinishSlice, competitionFinishData{v.tenantID, id, time.Now().Unix()})
+		competitionFinishSliceMutex.Unlock()
 	}
+
 	return c.JSON(http.StatusOK, SuccessResult{Status: true})
+}
+
+type competitionFinishData struct {
+	tenantId      int64
+	competitionId string
+	updatedAt     int64
+}
+
+var (
+	competitionFinishSlice      []competitionFinishData
+	competitionFinishSliceMutex sync.Mutex
+
+	competitionFinishHackeyCount      int
+	competitionFinishHackeyCountMutex sync.Mutex
+)
+
+func competitionFinishGoroutine() {
+	tick := time.Tick(1000 * time.Millisecond) // TODO: 調整する
+	for {
+		select {
+		case <-tick:
+			competitionFinishSliceMutex.Lock()
+			datas := competitionFinishSlice
+			competitionFinishSlice = []competitionFinishData{}
+			competitionFinishSliceMutex.Unlock()
+
+			// TODO: DB が1つになったら bulk insert する
+			for _, data := range datas {
+				//fmt.Printf("(kanata) tenantId: %d, competitionId: %s\n", data.tenantId, data.competitionId)
+				tenantDB, err := connectToTenantDB(data.tenantId)
+				if err != nil {
+					fmt.Printf("competitionFinishGoroutine: %v\n", err)
+				}
+				if _, err := tenantDB.Exec(
+					"UPDATE competition SET finished_at = ?, updated_at = ? WHERE id = ?",
+					data.updatedAt, data.updatedAt, data.competitionId,
+				); err != nil {
+					fmt.Printf("competitionFinishGoroutine: "+
+						"error Update competition: finishedAt=%d, updatedAt=%d, id=%s, %v\n",
+						data.updatedAt, data.updatedAt, data.competitionId, err,
+					)
+				}
+				tenantDB.Close()
+			}
+		}
+	}
 }
 
 type ScoreHandlerResult struct {
