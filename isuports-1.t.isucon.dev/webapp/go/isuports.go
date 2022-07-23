@@ -905,7 +905,7 @@ func playerDisqualifiedGoroutine() {
 			// TODO: DB が1つになったら bulk insert する
 			for _, data := range datas {
 				//debug
-				fmt.Printf("playerId: %s\n", data.playerId)
+				fmt.Printf("tenantId: %d, playerId: %s\n", data.tenantId, data.playerId)
 
 				tenantDB, err := connectToTenantDB(data.tenantId)
 				if err != nil {
