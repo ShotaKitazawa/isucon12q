@@ -893,21 +893,21 @@ var (
 )
 
 func playerDisqualifiedGoroutine() {
-	// debug code
+	// hackey code
 	for i := 0; i < 5; i++ {
 		playerDisqualifiedSliceMutex.Lock()
 		datas := playerDisqualifiedSlice
 		playerDisqualifiedSlice = []playerDisqualifiedData{}
 		playerDisqualifiedSliceMutex.Unlock()
 		if !(len(datas) > 0) {
-			fmt.Println("kanata debug code", i)
+			//fmt.Println("kanata debug code", i)
 			i--
 			time.Sleep(5 * time.Millisecond)
 			continue
 		}
 
 		for _, data := range datas {
-			fmt.Printf("(kanata) tenantId: %d, playerId: %s\n", data.tenantId, data.playerId)
+			// fmt.Printf("(kanata) tenantId: %d, playerId: %s\n", data.tenantId, data.playerId)
 
 			tenantDB, err := connectToTenantDB(data.tenantId)
 			if err != nil {
@@ -926,7 +926,7 @@ func playerDisqualifiedGoroutine() {
 		}
 	}
 
-	tick := time.Tick(150 * time.Millisecond) // TODO: 調整する
+	tick := time.Tick(1000 * time.Millisecond) // TODO: 調整する
 	for {
 		select {
 		case <-tick:
@@ -938,7 +938,7 @@ func playerDisqualifiedGoroutine() {
 			// TODO: DB が1つになったら bulk insert する
 			for _, data := range datas {
 				//debug
-				fmt.Printf("tenantId: %d, playerId: %s\n", data.tenantId, data.playerId)
+				//fmt.Printf("tenantId: %d, playerId: %s\n", data.tenantId, data.playerId)
 
 				tenantDB, err := connectToTenantDB(data.tenantId)
 				if err != nil {
@@ -1065,7 +1065,41 @@ var (
 )
 
 func competitionFinishGoroutine() {
-	tick := time.Tick(1 * time.Millisecond) // TODO: 調整する
+	// hacky code
+	for i := 0; i < 5; i++ {
+		competitionFinishSliceMutex.Lock()
+		datas := competitionFinishSlice
+		competitionFinishSlice = []competitionFinishData{}
+		competitionFinishSliceMutex.Unlock()
+		if !(len(datas) > 0) {
+			//fmt.Println("kanata debug code", i)
+			i--
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+
+		// TODO: DB が1つになったら bulk insert する
+		for _, data := range datas {
+			//fmt.Printf("(kanata) tenantId: %d, competitionId: %s\n", data.tenantId, data.competitionId)
+			tenantDB, err := connectToTenantDB(data.tenantId)
+			if err != nil {
+				fmt.Printf("competitionFinishGoroutine: %v\n", err)
+			}
+			if _, err := tenantDB.Exec(
+				"UPDATE competition SET finished_at = ?, updated_at = ? WHERE id = ?",
+				data.updatedAt, data.updatedAt, data.competitionId,
+			); err != nil {
+				fmt.Printf("competitionFinishGoroutine: "+
+					"error Update competition: finishedAt=%d, updatedAt=%d, id=%s, %v\n",
+					data.updatedAt, data.updatedAt, data.competitionId, err,
+				)
+			}
+			tenantDB.Close()
+		}
+
+	}
+
+	tick := time.Tick(1000 * time.Millisecond) // TODO: 調整する
 	for {
 		select {
 		case <-tick:
@@ -1076,6 +1110,7 @@ func competitionFinishGoroutine() {
 
 			// TODO: DB が1つになったら bulk insert する
 			for _, data := range datas {
+				//fmt.Printf("(kanata) tenantId: %d, competitionId: %s\n", data.tenantId, data.competitionId)
 				tenantDB, err := connectToTenantDB(data.tenantId)
 				if err != nil {
 					fmt.Printf("competitionFinishGoroutine: %v\n", err)
