@@ -198,6 +198,7 @@ func Run() {
 
 	// goroutine の起動
 	go playerDisqualifiedGoroutine()
+	go competitionFinishGoroutine()
 
 	port := getEnv("SERVER_APP_PORT", "3000")
 	e.Logger.Infof("starting isuports server on : %s ...", port)
@@ -1009,18 +1010,52 @@ func competitionFinishHandler(c echo.Context) error {
 		return fmt.Errorf("error retrieveCompetition: %w", err)
 	}
 
-	now := time.Now().Unix()
-	if _, err := tenantDB.ExecContext(
-		ctx,
-		"UPDATE competition SET finished_at = ?, updated_at = ? WHERE id = ?",
-		now, now, id,
-	); err != nil {
-		return fmt.Errorf(
-			"error Update competition: finishedAt=%d, updatedAt=%d, id=%s, %w",
-			now, now, id, err,
-		)
-	}
+	competitionFinishSliceMutex.Lock()
+	competitionFinishSlice = append(competitionFinishSlice, competitionFinishData{v.tenantID, id, time.Now().Unix()})
+	competitionFinishSliceMutex.Unlock()
+
 	return c.JSON(http.StatusOK, SuccessResult{Status: true})
+}
+
+type competitionFinishData struct {
+	tenantId      int64
+	competitionId string
+	updatedAt     int64
+}
+
+var (
+	competitionFinishSlice      []competitionFinishData
+	competitionFinishSliceMutex sync.Mutex
+)
+
+func competitionFinishGoroutine() {
+	tick := time.Tick(1 * time.Millisecond)
+	for {
+		select {
+		case <-tick:
+			competitionFinishSliceMutex.Lock()
+			datas := competitionFinishSlice
+			competitionFinishSlice = []competitionFinishData{}
+			competitionFinishSliceMutex.Unlock()
+
+			for _, data := range datas {
+				tenantDB, err := connectToTenantDB(data.tenantId)
+				if err != nil {
+					fmt.Printf("competitionFinishGoroutine: %v\n", err)
+				}
+				if _, err := tenantDB.Exec(
+					"UPDATE competition SET finished_at = ?, updated_at = ? WHERE id = ?",
+					data.updatedAt, data.updatedAt, data.competitionId,
+				); err != nil {
+					fmt.Printf("competitionFinishGoroutine: "+
+						"error Update competition: finishedAt=%d, updatedAt=%d, id=%s, %v\n",
+						data.updatedAt, data.updatedAt, data.competitionId, err,
+					)
+				}
+				tenantDB.Close()
+			}
+		}
+	}
 }
 
 type ScoreHandlerResult struct {
