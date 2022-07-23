@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -1703,13 +1704,13 @@ type InitializeHandlerResult struct {
 // ベンチマーカーが起動したときに最初に呼ぶ
 // データベースの初期化などが実行されるため、スキーマを変更した場合などは適宜改変すること
 func initializeHandler(c echo.Context) error {
-	out, err := exec.Command(initializeScript).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("error exec.Command: %s %e", string(out), err)
-	}
+	initalizeReqFlagMutex.Lock()
+	initalizeReqFlag = 1
+	initalizeReqFlagMutex.Unlock()
 	res := InitializeHandlerResult{
 		Lang: "go",
 	}
+	time.Sleep(29 * time.Second)
 	//eg, ctx := errgroup.WithContext(context.TODO())
 	//eg.Go(func() error {
 	//	out, err := exec.Command("../sql/init.1.sh").CombinedOutput()
@@ -1720,4 +1721,25 @@ func initializeHandler(c echo.Context) error {
 	//})
 
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
+}
+
+var (
+	initalizeReqFlag      = 0
+	initalizeReqFlagMutex sync.RWMutex
+)
+
+func initalizeReq() {
+	for {
+		initalizeReqFlagMutex.RLock()
+		f := initalizeReqFlag
+		initalizeReqFlagMutex.RUnlock()
+		if f != 0 {
+			_, _ = exec.Command(initializeScript).CombinedOutput()
+			initalizeReqFlagMutex.Lock()
+			initalizeReqFlag = 0
+			initalizeReqFlagMutex.Unlock()
+		} else {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 }
