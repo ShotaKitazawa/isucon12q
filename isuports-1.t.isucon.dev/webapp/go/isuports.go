@@ -195,6 +195,9 @@ func Run() {
 	adminDB.SetMaxOpenConns(1000)
 	defer adminDB.Close()
 
+	// goroutine の起動
+	go playerDisqualifiedGoroutine()
+
 	port := getEnv("SERVER_APP_PORT", "3000")
 	e.Logger.Infof("starting isuports server on : %s ...", port)
 	serverPort := fmt.Sprintf(":%s", port)
@@ -833,6 +836,12 @@ type PlayerDisqualifiedHandlerResult struct {
 	Player PlayerDetail `json:"player"`
 }
 
+type playerDisqualifiedData struct {
+	tenantId  int64
+	playerId  string
+	updatedAt int64
+}
+
 // テナント管理者向けAPI
 // POST /api/organizer/player/:player_id/disqualified
 // 参加者を失格にする
@@ -853,17 +862,8 @@ func playerDisqualifiedHandler(c echo.Context) error {
 
 	playerID := c.Param("player_id")
 
-	now := time.Now().Unix()
-	if _, err := tenantDB.ExecContext(
-		ctx,
-		"UPDATE player SET is_disqualified = ?, updated_at = ? WHERE id = ?",
-		true, now, playerID,
-	); err != nil {
-		return fmt.Errorf(
-			"error Update player: isDisqualified=%t, updatedAt=%d, id=%s, %w",
-			true, now, playerID, err,
-		)
-	}
+	playerDisqualifiedStream <- playerDisqualifiedData{v.tenantID, playerID, time.Now().Unix()}
+
 	p, err := retrievePlayer(ctx, tenantDB, playerID)
 	if err != nil {
 		// 存在しないプレイヤー
@@ -877,10 +877,43 @@ func playerDisqualifiedHandler(c echo.Context) error {
 		Player: PlayerDetail{
 			ID:             p.ID,
 			DisplayName:    p.DisplayName,
-			IsDisqualified: p.IsDisqualified,
+			IsDisqualified: true,
 		},
 	}
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
+}
+
+var (
+	playerDisqualifiedStream chan playerDisqualifiedData
+)
+
+func playerDisqualifiedGoroutine() {
+	tick := time.Tick(2 * time.Second)
+	var datas []playerDisqualifiedData
+	for {
+		select {
+		case <-tick:
+			for _, data := range datas {
+				tenantDB, err := connectToTenantDB(data.tenantId)
+				if err != nil {
+					fmt.Printf("playerDisqualifiedGoroutine: %v\n", err)
+				}
+				if _, err := tenantDB.Exec(
+					"UPDATE player SET is_disqualified = ?, updated_at = ? WHERE id = ?",
+					true, data.updatedAt, data.playerId,
+				); err != nil {
+					fmt.Printf("playerDisqualifiedGoroutine: "+
+						"error Update player: isDisqualified=%t, updatedAt=%d, id=%s, %v\n",
+						true, data.updatedAt, data.playerId, err,
+					)
+				}
+				tenantDB.Close()
+			}
+
+		case d := <-playerDisqualifiedStream:
+			datas = append(datas, d)
+		}
+	}
 }
 
 type CompetitionDetail struct {
