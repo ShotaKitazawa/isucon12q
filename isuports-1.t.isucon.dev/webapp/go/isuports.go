@@ -61,7 +61,7 @@ func connectMySQL(dbname string) (*sqlx.DB, error) {
 	config := mysql.NewConfig()
 	config.Net = "tcp"
 	//config.Addr = getEnv("ISUCON_DB_HOST", "127.0.0.1") + ":" + getEnv("ISUCON_DB_PORT", "3306")
-	config.Addr = getEnv("ISUCON_DB_HOST", "isuports-3.t.isucon.dev") + ":" + getEnv("ISUCON_DB_PORT", "3306")
+	config.Addr = "isuports-3.t.isucon.dev" + ":" + getEnv("ISUCON_DB_PORT", "3306")
 	config.User = getEnv("ISUCON_DB_USER", "isucon")
 	config.Passwd = getEnv("ISUCON_DB_PASSWORD", "isucon")
 	config.DBName = dbname
