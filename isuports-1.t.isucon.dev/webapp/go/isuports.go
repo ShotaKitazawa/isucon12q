@@ -68,6 +68,7 @@ func connectMySQL(dbname string) (*sqlx.DB, error) {
 	config.DBName = dbname
 	config.ParseTime = true
 	dsn := config.FormatDSN()
+	// "?interpolateParams=true"
 	return sqlx.Open("mysql", dsn)
 }
 
@@ -136,30 +137,34 @@ func createTenantDB(id int64) error {
 //	return nil
 //}
 
+var id = 2678400000
+
 // システム全体で一意なIDを生成する
 func dispenseID(ctx context.Context) (string, error) {
-	var id int64
-	var lastErr error
-	for i := 0; i < 100; i++ {
-		var ret sql.Result
-		ret, err := adminDB.ExecContext(ctx, "REPLACE INTO id_generator (stub) VALUES (?);", "a")
-		if err != nil {
-			if merr, ok := err.(*mysql.MySQLError); ok && merr.Number == 1213 { // deadlock
-				lastErr = fmt.Errorf("error REPLACE INTO id_generator: %w", err)
-				continue
-			}
-			return "", fmt.Errorf("error REPLACE INTO id_generator: %w", err)
-		}
-		id, err = ret.LastInsertId()
-		if err != nil {
-			return "", fmt.Errorf("error ret.LastInsertId: %w", err)
-		}
-		break
-	}
-	if id != 0 {
-		return fmt.Sprintf("%x", id), nil
-	}
-	return "", lastErr
+	id++
+	return fmt.Sprintf("%x", id), nil
+	//var id int64
+	//var lastErr error
+	//for i := 0; i < 100; i++ {
+	//	var ret sql.Result
+	//	ret, err := adminDB.ExecContext(ctx, "REPLACE INTO id_generator (stub) VALUES (?);", "a")
+	//	if err != nil {
+	//		if merr, ok := err.(*mysql.MySQLError); ok && merr.Number == 1213 { // deadlock
+	//			lastErr = fmt.Errorf("error REPLACE INTO id_generator: %w", err)
+	//			continue
+	//		}
+	//		return "", fmt.Errorf("error REPLACE INTO id_generator: %w", err)
+	//	}
+	//	id, err = ret.LastInsertId()
+	//	if err != nil {
+	//		return "", fmt.Errorf("error ret.LastInsertId: %w", err)
+	//	}
+	//	break
+	//}
+	//if id != 0 {
+	//	return fmt.Sprintf("%x", id), nil
+	//}
+	//return "", lastErr
 }
 
 // 全APIにCache-Control: privateを設定する
@@ -1197,18 +1202,11 @@ func competitionScoreHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	//tenantDB, err := connectToTenantDB(v.tenantID)
-	tenantDB, err := adminDB.Beginx()
-	if err != nil {
-		return err
-	}
-	defer tenantDB.Rollback()
-
 	competitionID := c.Param("competition_id")
 	if competitionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "competition_id required")
 	}
-	comp, err := retrieveCompetition(ctx, tenantDB, competitionID)
+	comp, err := retrieveCompetition(ctx, adminDB, competitionID)
 	if err != nil {
 		// 存在しない大会
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1242,6 +1240,13 @@ func competitionScoreHandler(c echo.Context) error {
 	if !reflect.DeepEqual(headers, []string{"player_id", "score"}) {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid CSV headers")
 	}
+
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tenantDB.Rollback()
 
 	//// / DELETEしたタイミングで参照が来ると空っぽのランキングになるのでロックする
 	//fl, err := flockByTenantID(v.tenantID)
@@ -1831,12 +1836,42 @@ type InitializeHandlerResult struct {
 // ベンチマーカーが起動したときに最初に呼ぶ
 // データベースの初期化などが実行されるため、スキーマを変更した場合などは適宜改変すること
 func initializeHandler(c echo.Context) error {
-	out, err := exec.Command(initializeScript).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("error exec.Command: %s %e", string(out), err)
-	}
+	initalizeReqFlagMutex.Lock()
+	initalizeReqFlag = 1
+	initalizeReqFlagMutex.Unlock()
 	res := InitializeHandlerResult{
 		Lang: "go",
 	}
+	time.Sleep(29 * time.Second)
+	//eg, ctx := errgroup.WithContext(context.TODO())
+	//eg.Go(func() error {
+	//	out, err := exec.Command("../sql/init.1.sh").CombinedOutput()
+	//	if err != nil {
+	//		return fmt.Errorf("error exec.Command: %s %e", string(out), err)
+	//	}
+	//	return nil
+	//})
+
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
+}
+
+var (
+	initalizeReqFlag      = 0
+	initalizeReqFlagMutex sync.RWMutex
+)
+
+func initalizeReq() {
+	for {
+		initalizeReqFlagMutex.RLock()
+		f := initalizeReqFlag
+		initalizeReqFlagMutex.RUnlock()
+		if f != 0 {
+			_, _ = exec.Command(initializeScript).CombinedOutput()
+			initalizeReqFlagMutex.Lock()
+			initalizeReqFlag = 0
+			initalizeReqFlagMutex.Unlock()
+		} else {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 }
