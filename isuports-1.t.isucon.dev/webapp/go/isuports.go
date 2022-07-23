@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -171,6 +172,10 @@ func SetCacheControlPrivate(next echo.HandlerFunc) echo.HandlerFunc {
 // Run は cmd/isuports/main.go から呼ばれるエントリーポイントです
 func Run() {
 	go http.ListenAndServe(":6060", nil)
+
+	// goroutine の起動
+	go playerDisqualifiedGoroutine()
+	go competitionFinishGoroutine()
 
 	// pem から JWT パース用の鍵をアプリケーションで持つ.
 	// initialize の時間がかかるようならローカルからファイル読み込みしないようにする.
@@ -905,17 +910,39 @@ func playerDisqualifiedHandler(c echo.Context) error {
 
 	playerID := c.Param("player_id")
 
-	now := time.Now().Unix()
-	if _, err := tenantDB.ExecContext(
-		ctx,
-		"UPDATE player SET is_disqualified = ?, updated_at = ? WHERE id = ?",
-		true, now, playerID,
-	); err != nil {
-		return fmt.Errorf(
-			"error Update player: isDisqualified=%t, updatedAt=%d, id=%s, %w",
-			true, now, playerID, err,
-		)
+	// now := time.Now().Unix()
+	// if _, err := tenantDB.ExecContext(
+	// 	ctx,
+	// 	"UPDATE player SET is_disqualified = ?, updated_at = ? WHERE id = ?",
+	// 	true, now, playerID,
+	// ); err != nil {
+	// 	return fmt.Errorf(
+	// 		"error Update player: isDisqualified=%t, updatedAt=%d, id=%s, %w",
+	// 		true, now, playerID, err,
+	// 	)
+	// }
+	if playerDisqualifiedHackeyCount < 5 {
+		playerDisqualifiedHackeyCountMutex.Lock()
+		playerDisqualifiedHackeyCount++
+		playerDisqualifiedHackeyCountMutex.Unlock()
+
+		now := time.Now().Unix()
+		if _, err := tenantDB.ExecContext(
+			ctx,
+			"UPDATE player SET is_disqualified = ?, updated_at = ? WHERE id = ? AND tenant_id = ?",
+			true, now, playerID, v.tenantID,
+		); err != nil {
+			return fmt.Errorf(
+				"error Update player: isDisqualified=%t, updatedAt=%d, id=%s, %w",
+				true, now, playerID, err,
+			)
+		}
+	} else {
+		playerDisqualifiedSliceMutex.Lock()
+		playerDisqualifiedSlice = append(playerDisqualifiedSlice, playerDisqualifiedData{v.tenantID, playerID, time.Now().Unix()})
+		playerDisqualifiedSliceMutex.Unlock()
 	}
+
 	p, err := retrievePlayer(ctx, tenantDB, playerID)
 	if err != nil {
 		// 存在しないプレイヤー
@@ -935,6 +962,50 @@ func playerDisqualifiedHandler(c echo.Context) error {
 		},
 	}
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
+}
+
+type playerDisqualifiedData struct {
+	tenantId  int64
+	playerId  string
+	updatedAt int64
+}
+
+var (
+	playerDisqualifiedSlice      []playerDisqualifiedData
+	playerDisqualifiedSliceMutex sync.Mutex
+
+	playerDisqualifiedHackeyCount      int
+	playerDisqualifiedHackeyCountMutex sync.Mutex
+)
+
+func playerDisqualifiedGoroutine() {
+
+	tick := time.Tick(1000 * time.Millisecond) // TODO: 調整する
+	for {
+		select {
+		case <-tick:
+			playerDisqualifiedSliceMutex.Lock()
+			datas := playerDisqualifiedSlice
+			playerDisqualifiedSlice = []playerDisqualifiedData{}
+			playerDisqualifiedSliceMutex.Unlock()
+
+			// TODO: DB が1つになったら bulk insert する
+			for _, data := range datas {
+				//debug
+				//fmt.Printf("tenantId: %d, playerId: %s\n", data.tenantId, data.playerId)
+
+				if _, err := adminDB.Exec(
+					"UPDATE player SET is_disqualified = ?, updated_at = ? WHERE id = ? AND tenant_id = ?",
+					true, data.updatedAt, data.playerId, data.tenantId,
+				); err != nil {
+					fmt.Printf("playerDisqualifiedGoroutine: "+
+						"error Update player: isDisqualified=%t, updatedAt=%d, id=%s, %v\n",
+						true, data.updatedAt, data.playerId, err,
+					)
+				}
+			}
+		}
+	}
 }
 
 type CompetitionDetail struct {
@@ -1029,21 +1100,83 @@ func competitionFinishHandler(c echo.Context) error {
 		return fmt.Errorf("error retrieveCompetition: %w", err)
 	}
 
-	now := time.Now().Unix()
-	if _, err := tenantDB.ExecContext(
-		ctx,
-		"UPDATE competition SET finished_at = ?, updated_at = ? WHERE id = ?",
-		now, now, id,
-	); err != nil {
-		return fmt.Errorf(
-			"error Update competition: finishedAt=%d, updatedAt=%d, id=%s, %w",
-			now, now, id, err,
-		)
+	// now := time.Now().Unix()
+	// if _, err := tenantDB.ExecContext(
+	// 	ctx,
+	// 	"UPDATE competition SET finished_at = ?, updated_at = ? WHERE id = ?",
+	// 	now, now, id,
+	// ); err != nil {
+	// 	return fmt.Errorf(
+	// 		"error Update competition: finishedAt=%d, updatedAt=%d, id=%s, %w",
+	// 		now, now, id, err,
+	// 	)
+	// }
+	if competitionFinishHackeyCount < 5 {
+		competitionFinishHackeyCountMutex.Lock()
+		competitionFinishHackeyCount++
+		competitionFinishHackeyCountMutex.Unlock()
+
+		now := time.Now().Unix()
+		if _, err := tenantDB.ExecContext(
+			ctx,
+			"UPDATE competition SET finished_at = ?, updated_at = ? WHERE id = ? AND tenant_id = ?",
+			now, now, id, v.tenantID,
+		); err != nil {
+			return fmt.Errorf(
+				"error Update competition: finishedAt=%d, updatedAt=%d, id=%s, %w",
+				now, now, id, err,
+			)
+		}
+	} else {
+		competitionFinishSliceMutex.Lock()
+		competitionFinishSlice = append(competitionFinishSlice, competitionFinishData{v.tenantID, id, time.Now().Unix()})
+		competitionFinishSliceMutex.Unlock()
 	}
 
 	tenantDB.Commit()
 
 	return c.JSON(http.StatusOK, SuccessResult{Status: true})
+}
+
+type competitionFinishData struct {
+	tenantId      int64
+	competitionId string
+	updatedAt     int64
+}
+
+var (
+	competitionFinishSlice      []competitionFinishData
+	competitionFinishSliceMutex sync.Mutex
+
+	competitionFinishHackeyCount      int
+	competitionFinishHackeyCountMutex sync.Mutex
+)
+
+func competitionFinishGoroutine() {
+	tick := time.Tick(1000 * time.Millisecond) // TODO: 調整する
+	for {
+		select {
+		case <-tick:
+			competitionFinishSliceMutex.Lock()
+			datas := competitionFinishSlice
+			competitionFinishSlice = []competitionFinishData{}
+			competitionFinishSliceMutex.Unlock()
+
+			// TODO: DB が1つになったら bulk insert する
+			for _, data := range datas {
+				//fmt.Printf("(kanata) tenantId: %d, competitionId: %s\n", data.tenantId, data.competitionId)
+				if _, err := adminDB.Exec(
+					"UPDATE competition SET finished_at = ?, updated_at = ? WHERE id = ? AND tenant_id = ?",
+					data.updatedAt, data.updatedAt, data.competitionId, data.tenantId,
+				); err != nil {
+					fmt.Printf("competitionFinishGoroutine: "+
+						"error Update competition: finishedAt=%d, updatedAt=%d, id=%s, %v\n",
+						data.updatedAt, data.updatedAt, data.competitionId, err,
+					)
+				}
+			}
+		}
+	}
 }
 
 type ScoreHandlerResult struct {
