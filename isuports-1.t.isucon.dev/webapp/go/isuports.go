@@ -67,7 +67,8 @@ func connectMySQL(dbname string) (*sqlx.DB, error) {
 	config.DBName = dbname
 	config.ParseTime = true
 	dsn := config.FormatDSN()
-	return sqlx.Open("mysql", dsn+"?interpolateParams=true")
+	// "?interpolateParams=true"
+	return sqlx.Open("mysql", dsn)
 }
 
 // 管理用DBに接続する
