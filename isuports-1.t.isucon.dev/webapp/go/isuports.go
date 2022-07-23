@@ -112,17 +112,18 @@ func connectToTenantDB(id int64) (*sqlx.Tx, error) {
 
 // テナントDBを新規に作成する
 func createTenantDB(id int64) error {
-	ctx := context.Background()
-	n := tenantDBName(id)
-	q := fmt.Sprintf("CREATE DATABASE %s", n)
-	if _, err := adminDB.ExecContext(ctx, q); err != nil {
-		return fmt.Errorf("failed to create tenant database: %s %e", n, err)
-	}
-	out, err := exec.Command("/home/isucon/webapp/sql/tenant_init.sh", n).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to create tenant table: %s %v", string(out), err)
-	}
 	return nil
+	//ctx := context.Background()
+	//n := tenantDBName(id)
+	//q := fmt.Sprintf("CREATE DATABASE %s", n)
+	//if _, err := adminDB.ExecContext(ctx, q); err != nil {
+	//	return fmt.Errorf("failed to create tenant database: %s %e", n, err)
+	//}
+	//out, err := exec.Command("/home/isucon/webapp/sql/tenant_init.sh", n).CombinedOutput()
+	//if err != nil {
+	//	return fmt.Errorf("failed to create tenant table: %s %v", string(out), err)
+	//}
+	//return nil
 }
 
 //func createTenantDB(id int64) error {
