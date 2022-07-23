@@ -892,7 +892,7 @@ var (
 )
 
 func playerDisqualifiedGoroutine() {
-	tick := time.Tick(1 * time.Second)
+	tick := time.Tick(1 * time.Millisecond)
 	for {
 		select {
 		case <-tick:
