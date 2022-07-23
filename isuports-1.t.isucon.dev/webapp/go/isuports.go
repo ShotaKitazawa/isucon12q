@@ -1072,7 +1072,7 @@ func competitionFinishGoroutine() {
 		competitionFinishSlice = []competitionFinishData{}
 		competitionFinishSliceMutex.Unlock()
 		if !(len(datas) > 0) {
-			//fmt.Println("kanata debug code", i)
+			fmt.Println("kanata debug code", i)
 			i--
 			time.Sleep(5 * time.Millisecond)
 			continue
