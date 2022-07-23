@@ -50,6 +50,9 @@ var (
 	sqliteDriverName = "sqlite3"
 )
 
+// Key pem から生成した JWT パース用の鍵
+var KeyForJWTParse jwt.SignEncryptParseOption
+
 // 環境変数を取得する、なければデフォルト値を返す
 func getEnv(key string, defaultValue string) string {
 	if val, ok := os.LookupEnv(key); ok {
@@ -244,20 +247,9 @@ func parseViewer(c echo.Context) (*Viewer, error) {
 		)
 	}
 	tokenStr := cookie.Value
-
-	keyFilename := getEnv("ISUCON_JWT_KEY_FILE", "../public.pem")
-	keysrc, err := os.ReadFile(keyFilename)
-	if err != nil {
-		return nil, fmt.Errorf("error os.ReadFile: keyFilename=%s: %w", keyFilename, err)
-	}
-	key, _, err := jwk.DecodePEM(keysrc)
-	if err != nil {
-		return nil, fmt.Errorf("error jwk.DecodePEM: %w", err)
-	}
-
 	token, err := jwt.Parse(
 		[]byte(tokenStr),
-		jwt.WithKey(jwa.RS256, key),
+		KeyForJWTParse,
 	)
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusUnauthorized, fmt.Errorf("error jwt.Parse: %s", err.Error()))
@@ -1619,5 +1611,18 @@ func initializeHandler(c echo.Context) error {
 	res := InitializeHandlerResult{
 		Lang: "go",
 	}
+
+	// pem から JWT パース用の鍵をアプリケーションで持つ.
+	// initialize の時間がかかるようならローカルからファイル読み込みしないようにする.
+	keyFilename := getEnv("ISUCON_JWT_KEY_FILE", "../public.pem")
+	keysrc, err := os.ReadFile(keyFilename)
+	if err != nil {
+		return fmt.Errorf("error os.ReadFile: keyFilename=%s: %w", keyFilename, err)
+	}
+	k, _, err := jwk.DecodePEM(keysrc)
+	if err != nil {
+		return fmt.Errorf("error jwk.DecodePEM: %w", err)
+	}
+	KeyForJWTParse = jwt.WithKey(jwa.RS256, k)
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
 }
