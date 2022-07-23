@@ -99,6 +99,8 @@ func createTenantDB(id int64) error {
 }
 
 // システム全体で一意なIDを生成する
+// TODO: なんかもっと良い方法ありそう.
+// 全体の実装見てからどう移行できるか考えた方が良い.
 func dispenseID(ctx context.Context) (string, error) {
 	var id int64
 	var lastErr error
@@ -138,6 +140,7 @@ func Run() {
 
 	e := echo.New()
 	e.Debug = true
+	// TODO: 最終的にはログレベル落とす
 	e.Logger.SetLevel(log.DEBUG)
 
 	var (
@@ -503,6 +506,8 @@ func tenantsAddHandler(c echo.Context) error {
 
 // テナント名が規則に沿っているかチェックする
 func validateTenantName(name string) error {
+	// 正規表現で沿っているか確認している.
+	// これくらいなら正規表現使わなくても良さそう.
 	if tenantNameRegexp.MatchString(name) {
 		return nil
 	}
@@ -673,6 +678,8 @@ func tenantsBillingHandler(c echo.Context) error {
 			}
 			defer tenantDB.Close()
 			cs := []CompetitionRow{}
+			// TODO: N+1
+			// tenant ごと
 			if err := tenantDB.SelectContext(
 				ctx,
 				&cs,
@@ -682,6 +689,7 @@ func tenantsBillingHandler(c echo.Context) error {
 				return fmt.Errorf("failed to Select competition: %w", err)
 			}
 			for _, comp := range cs {
+				// TODO: N+1
 				report, err := billingReportByCompetition(ctx, tenantDB, t.ID, comp.ID)
 				if err != nil {
 					return fmt.Errorf("failed to billingReportByCompetition: %w", err)
@@ -794,6 +802,7 @@ func playersAddHandler(c echo.Context) error {
 		}
 
 		now := time.Now().Unix()
+		// TODO: bulk insert ?
 		if _, err := tenantDB.ExecContext(
 			ctx,
 			"INSERT INTO player (id, tenant_id, display_name, is_disqualified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1046,6 +1055,7 @@ func competitionScoreHandler(c echo.Context) error {
 	defer fl.Close()
 	var rowNum int64
 	playerScoreRows := []PlayerScoreRow{}
+	// MEMO: csv 1 行ずつ処理.
 	for {
 		rowNum++
 		row, err := r.Read()
@@ -1059,6 +1069,8 @@ func competitionScoreHandler(c echo.Context) error {
 			return fmt.Errorf("row must have two columns: %#v", row)
 		}
 		playerID, scoreStr := row[0], row[1]
+		// TODO: N+1
+		// CSV 読み込んでから where in とかで取得でいけそう？
 		if _, err := retrievePlayer(ctx, tenantDB, playerID); err != nil {
 			// 存在しない参加者が含まれている
 			if errors.Is(err, sql.ErrNoRows) {
@@ -1101,6 +1113,7 @@ func competitionScoreHandler(c echo.Context) error {
 	); err != nil {
 		return fmt.Errorf("error Delete player_score: tenantID=%d, competitionID=%s, %w", v.tenantID, competitionID, err)
 	}
+	// TODO: bulk insert ?(sqlite3)
 	for _, ps := range playerScoreRows {
 		if _, err := tenantDB.NamedExecContext(
 			ctx,
@@ -1155,6 +1168,7 @@ func billingHandler(c echo.Context) error {
 	}
 	tbrs := make([]BillingReport, 0, len(cs))
 	for _, comp := range cs {
+		// TODO: N+1
 		report, err := billingReportByCompetition(ctx, tenantDB, v.tenantID, comp.ID)
 		if err != nil {
 			return fmt.Errorf("error billingReportByCompetition: %w", err)
