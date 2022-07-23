@@ -8,7 +8,7 @@ setup:
 slack:
   default_channel_id: "C6FC55B6W"
 hosts:
-- host: isuports-1.t.isucon.dev
+- host: isuports-3.t.isucon.dev
   user: &user root
   key: &key /root/.ssh/id_rsa
   deploy: &deploy
