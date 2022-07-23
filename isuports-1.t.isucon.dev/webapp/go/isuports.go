@@ -895,14 +895,14 @@ var (
 func playerDisqualifiedGoroutine() {
 	// debug code
 	for i := 0; i < 5; i++ {
-		fmt.Println("kanata debug code", i)
 		playerDisqualifiedSliceMutex.Lock()
 		datas := playerDisqualifiedSlice
 		playerDisqualifiedSlice = []playerDisqualifiedData{}
 		playerDisqualifiedSliceMutex.Unlock()
-		if !(len(playerDisqualifiedSlice) > 0) {
+		if !(len(datas) > 0) {
+			fmt.Println("kanata debug code", i)
 			i--
-			time.Sleep(time.Millisecond)
+			time.Sleep(5 * time.Millisecond)
 			continue
 		}
 
