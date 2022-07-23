@@ -1399,11 +1399,10 @@ func competitionRankingHandler(c echo.Context) error {
 	); err != nil {
 		return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
 	}
-	fmt.Printf("competition_id %s, player_socre count %d\n", competitionID, len(pss))
+	fmt.Printf("tenant %s, competition_id %s, player_socre count %d\n", tenantDBName(v.tenantID), competitionID, len(pss))
 	ranks := make([]CompetitionRank, 0, len(pss))
 	scoredPlayerSet := make(map[string]struct{}, len(pss))
 	for _, ps := range pss {
-		fmt.Println(ps.Score)
 		// player_scoreが同一player_id内ではrow_numの降順でソートされているので
 		// 現れたのが2回目以降のplayer_idはより大きいrow_numでスコアが出ているとみなせる
 		if _, ok := scoredPlayerSet[ps.PlayerID]; ok {
