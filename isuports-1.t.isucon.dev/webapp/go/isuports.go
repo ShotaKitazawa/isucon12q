@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/gofrs/flock"
+	"github.com/gomodule/redigo/redis"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -372,9 +374,12 @@ type PlayerRow struct {
 
 // 参加者を取得する
 func retrievePlayer(ctx context.Context, tenantDB dbOrTx, tenantID int64, id string) (*PlayerRow, error) {
-	tp, ok := Player.GetValue(tenantPlayerMapKey(tenantID, id))
+	tp, ok, err := Player.GetValue(tenantPlayerMapKey(tenantID, id))
+	if err != nil {
+		return nil, err
+	}
 	if ok {
-		return &tp, nil
+		return tp, nil
 	}
 	return nil, sql.ErrNoRows
 }
@@ -875,7 +880,10 @@ func playerDisqualifiedHandler(c echo.Context) error {
 	defer tenantDB.Close()
 
 	playerID := c.Param("player_id")
-	p, ok := Player.GetValue(tenantPlayerMapKey(v.tenantID, playerID))
+	p, ok, err := Player.GetValue(tenantPlayerMapKey(v.tenantID, playerID))
+	if err != nil {
+		return fmt.Errorf("Player GetValue: %w", err)
+	}
 	if !ok {
 		return echo.NewHTTPError(http.StatusNotFound, "player not found")
 	}
@@ -885,14 +893,16 @@ func playerDisqualifiedHandler(c echo.Context) error {
 		playerDisqualifiedHackeyCountMutex.Unlock()
 
 		now := time.Now().Unix()
-		Player.SetValue(tenantPlayerMapKey(v.tenantID, playerID), PlayerRow{
+		if err := Player.SetValue(tenantPlayerMapKey(v.tenantID, playerID), PlayerRow{
 			TenantID:       p.TenantID,
 			ID:             p.ID,
 			DisplayName:    p.DisplayName,
 			IsDisqualified: true,
 			CreatedAt:      p.CreatedAt,
 			UpdatedAt:      now,
-		})
+		}); err != nil {
+			return err
+		}
 	} else {
 		playerDisqualifiedSliceMutex.Lock()
 		playerDisqualifiedSlice = append(playerDisqualifiedSlice, playerDisqualifiedData{v.tenantID, playerID, time.Now().Unix()})
@@ -938,9 +948,12 @@ func playerDisqualifiedGoroutine() {
 			for _, data := range datas {
 				//debug
 				//fmt.Printf("tenantId: %d, playerId: %s\n", data.tenantId, data.playerId)
-				p, ok := Player.GetValue(tenantPlayerMapKey(data.tenantId, data.playerId))
+				p, ok, err := Player.GetValue(tenantPlayerMapKey(data.tenantId, data.playerId))
+				if err != nil {
+					fmt.Printf("faile err. Player.GetValue: %s\n", tenantPlayerMapKey(data.tenantId, data.playerId))
+				}
 				if !ok {
-					fmt.Printf("Player.GetValue: %s\n", tenantPlayerMapKey(data.tenantId, data.playerId))
+					fmt.Printf("ok is false. Player.GetValue: %s\n", tenantPlayerMapKey(data.tenantId, data.playerId))
 				}
 				Player.SetValue(tenantPlayerMapKey(data.tenantId, data.playerId), PlayerRow{
 					TenantID:       data.tenantId,
@@ -1804,28 +1817,55 @@ func initializeHandler(c echo.Context) error {
 var initTenantMaxID int64 = 100
 
 type PlayerMap struct {
-	mux    sync.RWMutex
 	Player map[string]PlayerRow
 }
 
-func (m *PlayerMap) GetValue(key string) (PlayerRow, bool) {
-	m.mux.RLock()
-	defer m.mux.RUnlock()
-	p, ok := m.Player[key]
-	return p, ok
+func (m *PlayerMap) GetValue(key string) (*PlayerRow, bool, error) {
+	conn := c.Get()
+	defer conn.Close()
+
+	data, err := redis.Bytes(conn.Do("GET", key))
+	if errors.Is(err, redis.ErrNil) {
+		fmt.Println("redis: error nil")
+		return nil, false, nil
+	}
+	if err != nil && !errors.Is(err, redis.ErrNil) {
+		return nil, false, err
+	}
+	if data == nil {
+		return nil, false, nil
+	}
+	value := PlayerRow{}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return nil, true, err
+	}
+	return &value, true, nil
 }
-func (m *PlayerMap) SetValue(key string, value PlayerRow) {
-	m.mux.Lock()
-	defer m.mux.Unlock()
-	m.Player[key] = value
+func (m *PlayerMap) SetValue(key string, value PlayerRow) error {
+	conn := c.Get()
+	defer conn.Close()
+	data, err := json.Marshal(&value)
+	if err != nil {
+		return err
+	}
+	_, err = conn.Do("SET", key, data)
+	return err
 }
 
-func (m *PlayerMap) SetMultiValue(tenantID int64, value []PlayerRow) {
-	m.mux.Lock()
-	defer m.mux.Unlock()
+func (m *PlayerMap) SetMultiValue(tenantID int64, value []PlayerRow) error {
+	conn := c.Get()
+	defer conn.Close()
 	for _, p := range value {
-		m.Player[tenantPlayerMapKey(tenantID, p.ID)] = p
+		data, err := json.Marshal(&p)
+		if err != nil {
+			return err
+		}
+		_, err = conn.Do("SET", tenantPlayerMapKey(tenantID, p.ID), data)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 var Player PlayerMap
@@ -1833,3 +1873,12 @@ var Player PlayerMap
 func tenantPlayerMapKey(tID int64, pID string) string {
 	return strconv.Itoa(int(tID)) + ":" + pID
 }
+
+var (
+	c *redis.Pool = &redis.Pool{
+		MaxIdle:     3,
+		MaxActive:   0,
+		IdleTimeout: 240 * time.Second,
+		Dial:        func() (redis.Conn, error) { return redis.Dial("tcp", "192.168.0.11:6379") },
+	}
+)
