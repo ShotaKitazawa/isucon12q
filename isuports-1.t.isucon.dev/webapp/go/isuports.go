@@ -88,10 +88,14 @@ func tenantDBName(id int64) string {
 var tenantDBMap = make(map[int64]*sqlx.DB)
 
 // テナントDBに接続する
-func connectToTenantDB(id int64) (*sqlx.DB, error) {
+func connectToTenantDB(id int64) (*sqlx.Tx, error) {
 	v, ok := tenantDBMap[id]
 	if ok {
-		return v, nil
+		tx, err := v.Beginx()
+		if err != nil {
+			return nil, err
+		}
+		return tx, nil
 	}
 	dbname := tenantDBName(id)
 	vv, err := connectMySQL(dbname)
@@ -99,7 +103,11 @@ func connectToTenantDB(id int64) (*sqlx.DB, error) {
 		return nil, err
 	}
 	tenantDBMap[id] = vv
-	return vv, nil
+	tx, err := vv.Beginx()
+	if err != nil {
+		return nil, err
+	}
+	return tx, nil
 }
 
 //func connectToTenantDB(id int64) (*sqlx.DB, error) {
@@ -232,6 +240,9 @@ func Run() {
 	}
 	adminDB.SetMaxOpenConns(1000)
 	defer adminDB.Close()
+	for _, v := range tenantDBMap {
+		v.Close()
+	}
 
 	port := getEnv("SERVER_APP_PORT", "3000")
 	e.Logger.Infof("starting isuports server on : %s ...", port)
@@ -709,7 +720,7 @@ func tenantsBillingHandler(c echo.Context) error {
 			if err != nil {
 				return fmt.Errorf("failed to connectToTenantDB: %w", err)
 			}
-			defer tenantDB.Close()
+			defer tenantDB.Rollback()
 			cs := []CompetitionRow{}
 			if err := tenantDB.SelectContext(
 				ctx,
@@ -727,6 +738,9 @@ func tenantsBillingHandler(c echo.Context) error {
 				tb.BillingYen += report.BillingYen
 			}
 			tenantBillings = append(tenantBillings, tb)
+
+			tenantDB.Commit()
+
 			return nil
 		}(t)
 		if err != nil {
@@ -770,7 +784,7 @@ func playersListHandler(c echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("error connectToTenantDB: %w", err)
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	var pls []PlayerRow
 	if err := tenantDB.SelectContext(
@@ -789,6 +803,8 @@ func playersListHandler(c echo.Context) error {
 			IsDisqualified: p.IsDisqualified,
 		})
 	}
+
+	tenantDB.Commit()
 
 	res := PlayersListHandlerResult{
 		Players: pds,
@@ -816,7 +832,7 @@ func playersAddHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	params, err := c.FormParams()
 	if err != nil {
@@ -853,6 +869,8 @@ func playersAddHandler(c echo.Context) error {
 		})
 	}
 
+	tenantDB.Commit()
+
 	res := PlayersAddHandlerResult{
 		Players: pds,
 	}
@@ -879,7 +897,7 @@ func playerDisqualifiedHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	playerID := c.Param("player_id")
 
@@ -902,6 +920,8 @@ func playerDisqualifiedHandler(c echo.Context) error {
 		}
 		return fmt.Errorf("error retrievePlayer: %w", err)
 	}
+
+	tenantDB.Commit()
 
 	res := PlayerDisqualifiedHandlerResult{
 		Player: PlayerDetail{
@@ -939,7 +959,7 @@ func competitionsAddHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	title := c.FormValue("title")
 
@@ -958,6 +978,8 @@ func competitionsAddHandler(c echo.Context) error {
 			id, v.tenantID, title, now, now, err,
 		)
 	}
+
+	tenantDB.Commit()
 
 	fmt.Printf("added tenant id %d, comp id %s, title %s\n", v.tenantID, id, title)
 	res := CompetitionsAddHandlerResult{
@@ -986,7 +1008,7 @@ func competitionFinishHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	id := c.Param("competition_id")
 	if id == "" {
@@ -1012,6 +1034,9 @@ func competitionFinishHandler(c echo.Context) error {
 			now, now, id, err,
 		)
 	}
+
+	tenantDB.Commit()
+
 	return c.JSON(http.StatusOK, SuccessResult{Status: true})
 }
 
@@ -1036,7 +1061,7 @@ func competitionScoreHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	competitionID := c.Param("competition_id")
 	if competitionID == "" {
@@ -1154,6 +1179,8 @@ func competitionScoreHandler(c echo.Context) error {
 		}
 	}
 
+	tenantDB.Commit()
+
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
 		Data:   ScoreHandlerResult{Rows: int64(len(playerScoreRows))},
@@ -1181,7 +1208,7 @@ func billingHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	cs := []CompetitionRow{}
 	if err := tenantDB.SelectContext(
@@ -1200,6 +1227,8 @@ func billingHandler(c echo.Context) error {
 		}
 		tbrs = append(tbrs, *report)
 	}
+
+	tenantDB.Commit()
 
 	res := SuccessResult{
 		Status: true,
@@ -1238,7 +1267,7 @@ func playerHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	if err := authorizePlayer(ctx, tenantDB, v.playerID); err != nil {
 		return err
@@ -1304,6 +1333,8 @@ func playerHandler(c echo.Context) error {
 		})
 	}
 
+	tenantDB.Commit()
+
 	res := SuccessResult{
 		Status: true,
 		Data: PlayerHandlerResult{
@@ -1348,7 +1379,7 @@ func competitionRankingHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	if err := authorizePlayer(ctx, tenantDB, v.playerID); err != nil {
 		return err
@@ -1453,6 +1484,8 @@ func competitionRankingHandler(c echo.Context) error {
 		}
 	}
 
+	tenantDB.Commit()
+
 	res := SuccessResult{
 		Status: true,
 		Data: CompetitionRankingHandlerResult{
@@ -1489,11 +1522,12 @@ func playerCompetitionsHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	if err := authorizePlayer(ctx, tenantDB, v.playerID); err != nil {
 		return err
 	}
+	tenantDB.Commit()
 	return competitionsHandler(c, v, tenantDB)
 }
 
@@ -1513,7 +1547,9 @@ func organizerCompetitionsHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
+
+	tenantDB.Commit()
 
 	return competitionsHandler(c, v, tenantDB)
 }
@@ -1604,6 +1640,7 @@ func meHandler(c echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("error connectToTenantDB: %w", err)
 	}
+	defer tenantDB.Rollback()
 	ctx := context.Background()
 	p, err := retrievePlayer(ctx, tenantDB, v.playerID)
 	if err != nil {
@@ -1620,6 +1657,8 @@ func meHandler(c echo.Context) error {
 		}
 		return fmt.Errorf("error retrievePlayer: %w", err)
 	}
+
+	tenantDB.Commit()
 
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
