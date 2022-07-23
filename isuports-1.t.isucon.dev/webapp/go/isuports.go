@@ -892,7 +892,7 @@ var (
 )
 
 func playerDisqualifiedGoroutine() {
-	tick := time.Tick(2 * time.Second)
+	tick := time.Tick(1 * time.Second)
 	for {
 		select {
 		case <-tick:
@@ -902,6 +902,9 @@ func playerDisqualifiedGoroutine() {
 			playerDisqualifiedSliceMutex.Unlock()
 
 			for _, data := range datas {
+				// for debug
+				fmt.Println(data.tenantId, data.playerId)
+
 				tenantDB, err := connectToTenantDB(data.tenantId)
 				if err != nil {
 					fmt.Printf("playerDisqualifiedGoroutine: %v\n", err)
