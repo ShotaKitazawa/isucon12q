@@ -992,7 +992,6 @@ func competitionsAddHandler(c echo.Context) error {
 
 	tenantDB.Commit()
 
-	fmt.Printf("added tenant id %d, comp id %s, title %s\n", v.tenantID, id, title)
 	res := CompetitionsAddHandlerResult{
 		Competition: CompetitionDetail{
 			ID:         id,
@@ -1405,7 +1404,6 @@ func competitionRankingHandler(c echo.Context) error {
 	if competitionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "competition_id is required")
 	}
-	fmt.Printf("get tenant id %d, comp id %s\n", v.tenantID, competitionID)
 
 	// 大会の存在確認
 	competition, err := retrieveCompetition(ctx, tenantDB, competitionID)
@@ -1457,7 +1455,6 @@ func competitionRankingHandler(c echo.Context) error {
 	); err != nil {
 		return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
 	}
-	fmt.Printf("tenant %s, competition_id %s, player_socre count %d\n", tenantDBName(v.tenantID), competitionID, len(pss))
 	ranks := make([]CompetitionRank, 0, len(pss))
 	scoredPlayerSet := make(map[string]struct{}, len(pss))
 	for _, ps := range pss {
