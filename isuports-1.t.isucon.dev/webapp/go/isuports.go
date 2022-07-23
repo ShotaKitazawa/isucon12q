@@ -1516,18 +1516,18 @@ func playerCompetitionsHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role player required")
 	}
 
-	//tenantDB, err := connectToTenantDB(v.tenantID)
-	tenantDB, err := adminDB.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tenantDB.Rollback()
+	////tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := adminDB.BeginTxx(ctx, nil)
+	//if err != nil {
+	//	return err
+	//}
+	//defer tenantDB.Rollback()
 
-	if err := authorizePlayer(ctx, tenantDB, v.playerID); err != nil {
+	if err := authorizePlayer(ctx, adminDB, v.playerID); err != nil {
 		return err
 	}
-	tenantDB.Commit()
-	return competitionsHandler(c, v, tenantDB)
+	//tenantDB.Commit()
+	return competitionsHandler(c, v, adminDB)
 }
 
 // テナント管理者向けAPI
