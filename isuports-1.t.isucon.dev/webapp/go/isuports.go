@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
-	"github.com/gofrs/flock"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -59,45 +58,83 @@ func getEnv(key string, defaultValue string) string {
 	return defaultValue
 }
 
-// 管理用DBに接続する
-func connectAdminDB() (*sqlx.DB, error) {
+func connectMySQL(dbname string) (*sqlx.DB, error) {
 	config := mysql.NewConfig()
 	config.Net = "tcp"
 	config.Addr = getEnv("ISUCON_DB_HOST", "127.0.0.1") + ":" + getEnv("ISUCON_DB_PORT", "3306")
+	//config.Addr = "isuports-3.t.isucon.dev" + ":" + getEnv("ISUCON_DB_PORT", "3306")
 	config.User = getEnv("ISUCON_DB_USER", "isucon")
 	config.Passwd = getEnv("ISUCON_DB_PASSWORD", "isucon")
-	config.DBName = getEnv("ISUCON_DB_NAME", "isuports")
+	config.DBName = dbname
 	config.ParseTime = true
 	dsn := config.FormatDSN()
 	return sqlx.Open("mysql", dsn)
 }
 
-// テナントDBのパスを返す
-func tenantDBPath(id int64) string {
-	tenantDBDir := getEnv("ISUCON_TENANT_DB_DIR", "../tenant_db")
-	return filepath.Join(tenantDBDir, fmt.Sprintf("%d.db", id))
+// 管理用DBに接続する
+func connectAdminDB() (*sqlx.DB, error) {
+	dbname := getEnv("ISUCON_DB_NAME", "isuports")
+	return connectMySQL(dbname)
+}
+
+//// テナントDBのパスを返す
+//func tenantDBPath(id int64) string {
+//	tenantDBDir := getEnv("ISUCON_TENANT_DB_DIR", "../tenant_db")
+//	return filepath.Join(tenantDBDir, fmt.Sprintf("%d.db", id))
+//}
+
+func tenantDBName(id int64) string {
+	return fmt.Sprintf("tenant_%d", id)
 }
 
 // テナントDBに接続する
-func connectToTenantDB(id int64) (*sqlx.DB, error) {
-	p := tenantDBPath(id)
-	db, err := sqlx.Open(sqliteDriverName, fmt.Sprintf("file:%s?mode=rw", p))
+func connectToTenantDB(id int64) (*sqlx.Tx, error) {
+	dbname := tenantDBName(id)
+	v, err := connectMySQL(dbname)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open tenant DB: %w", err)
+		return nil, err
 	}
-	return db, nil
+	tx, err := v.Beginx()
+	if err != nil {
+		return nil, err
+	}
+	return tx, nil
 }
+
+//func connectToTenantDB(id int64) (*sqlx.DB, error) {
+//	p := tenantDBPath(id)
+//	db, err := sqlx.Open(sqliteDriverName, fmt.Sprintf("file:%s?mode=rw", p))
+//	if err != nil {
+//		return nil, fmt.Errorf("failed to open tenant DB: %w", err)
+//	}
+//	return db, nil
+//}
 
 // テナントDBを新規に作成する
 func createTenantDB(id int64) error {
-	p := tenantDBPath(id)
-
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("sqlite3 %s < %s", p, tenantDBSchemaFilePath))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to exec sqlite3 %s < %s, out=%s: %w", p, tenantDBSchemaFilePath, string(out), err)
-	}
 	return nil
+	//ctx := context.Background()
+	//n := tenantDBName(id)
+	//q := fmt.Sprintf("CREATE DATABASE %s", n)
+	//if _, err := adminDB.ExecContext(ctx, q); err != nil {
+	//	return fmt.Errorf("failed to create tenant database: %s %e", n, err)
+	//}
+	//out, err := exec.Command("/home/isucon/webapp/sql/tenant_init.sh", n).CombinedOutput()
+	//if err != nil {
+	//	return fmt.Errorf("failed to create tenant table: %s %v", string(out), err)
+	//}
+	//return nil
 }
+
+//func createTenantDB(id int64) error {
+//	p := tenantDBPath(id)
+//
+//	cmd := exec.Command("sh", "-c", fmt.Sprintf("sqlite3 %s < %s", p, tenantDBSchemaFilePath))
+//	if out, err := cmd.CombinedOutput(); err != nil {
+//		return fmt.Errorf("failed to exec sqlite3 %s < %s, out=%s: %w", p, tenantDBSchemaFilePath, string(out), err)
+//	}
+//	return nil
+//}
 
 // システム全体で一意なIDを生成する
 func dispenseID(ctx context.Context) (string, error) {
@@ -140,6 +177,18 @@ func Run() {
 	// goroutine の起動
 	go playerDisqualifiedGoroutine()
 	go competitionFinishGoroutine()
+	// pem から JWT パース用の鍵をアプリケーションで持つ.
+	// initialize の時間がかかるようならローカルからファイル読み込みしないようにする.
+	keyFilename := getEnv("ISUCON_JWT_KEY_FILE", "../public.pem")
+	keysrc, err := os.ReadFile(keyFilename)
+	if err != nil {
+		panic(err)
+	}
+	k, _, err := jwk.DecodePEM(keysrc)
+	if err != nil {
+		panic(err)
+	}
+	KeyForJWTParse = jwt.WithKey(jwa.RS256, k)
 
 	e := echo.New()
 	e.Debug = true
@@ -147,7 +196,6 @@ func Run() {
 
 	var (
 		sqlLogger io.Closer
-		err       error
 	)
 	// sqliteのクエリログを出力する設定
 	// 環境変数 ISUCON_SQLITE_TRACE_FILE を設定すると、そのファイルにクエリログをJSON形式で出力する
@@ -427,16 +475,16 @@ func lockFilePath(id int64) string {
 	return filepath.Join(tenantDBDir, fmt.Sprintf("%d.lock", id))
 }
 
-// 排他ロックする
-func flockByTenantID(tenantID int64) (io.Closer, error) {
-	p := lockFilePath(tenantID)
-
-	fl := flock.New(p)
-	if err := fl.Lock(); err != nil {
-		return nil, fmt.Errorf("error flock.Lock: path=%s, %w", p, err)
-	}
-	return fl, nil
-}
+//// 排他ロックする
+//func flockByTenantID(tenantID int64) (io.Closer, error) {
+//	p := lockFilePath(tenantID)
+//
+//	fl := flock.New(p)
+//	if err := fl.Lock(); err != nil {
+//		return nil, fmt.Errorf("error flock.Lock: path=%s, %w", p, err)
+//	}
+//	return fl, nil
+//}
 
 type TenantsAddHandlerResult struct {
 	Tenant TenantWithBilling `json:"tenant"`
@@ -564,12 +612,12 @@ func billingReportByCompetition(ctx context.Context, tenantDB dbOrTx, tenantID i
 		billingMap[vh.PlayerID] = "visitor"
 	}
 
-	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
-	fl, err := flockByTenantID(tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("error flockByTenantID: %w", err)
-	}
-	defer fl.Close()
+	//// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
+	//fl, err := flockByTenantID(tenantID)
+	//if err != nil {
+	//	return nil, fmt.Errorf("error flockByTenantID: %w", err)
+	//}
+	//defer fl.Close()
 
 	// スコアを登録した参加者のIDを取得する
 	scoredPlayerIDs := []string{}
@@ -672,13 +720,15 @@ func tenantsBillingHandler(c echo.Context) error {
 				Name:        t.Name,
 				DisplayName: t.DisplayName,
 			}
-			tenantDB, err := connectToTenantDB(t.ID)
-			if err != nil {
-				return fmt.Errorf("failed to connectToTenantDB: %w", err)
-			}
-			defer tenantDB.Close()
+			//tenantDB, err := connectToTenantDB(t.ID)
+			//tenantDB, err := adminDB.Beginx()
+			//if err != nil {
+			//	return fmt.Errorf("failed to connectToTenantDB: %w", err)
+			//}
+			//defer tenantDB.Rollback()
+			//tenantDB = adminDB
 			cs := []CompetitionRow{}
-			if err := tenantDB.SelectContext(
+			if err := adminDB.SelectContext(
 				ctx,
 				&cs,
 				"SELECT * FROM competition WHERE tenant_id=?",
@@ -687,13 +737,16 @@ func tenantsBillingHandler(c echo.Context) error {
 				return fmt.Errorf("failed to Select competition: %w", err)
 			}
 			for _, comp := range cs {
-				report, err := billingReportByCompetition(ctx, tenantDB, t.ID, comp.ID)
+				report, err := billingReportByCompetition(ctx, adminDB, t.ID, comp.ID)
 				if err != nil {
 					return fmt.Errorf("failed to billingReportByCompetition: %w", err)
 				}
 				tb.BillingYen += report.BillingYen
 			}
 			tenantBillings = append(tenantBillings, tb)
+
+			//tenantDB.Commit()
+
 			return nil
 		}(t)
 		if err != nil {
@@ -733,11 +786,12 @@ func playersListHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return fmt.Errorf("error connectToTenantDB: %w", err)
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	var pls []PlayerRow
 	if err := tenantDB.SelectContext(
@@ -756,6 +810,8 @@ func playersListHandler(c echo.Context) error {
 			IsDisqualified: p.IsDisqualified,
 		})
 	}
+
+	tenantDB.Commit()
 
 	res := PlayersListHandlerResult{
 		Players: pds,
@@ -779,11 +835,12 @@ func playersAddHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	params, err := c.FormParams()
 	if err != nil {
@@ -820,6 +877,8 @@ func playersAddHandler(c echo.Context) error {
 		})
 	}
 
+	tenantDB.Commit()
+
 	res := PlayersAddHandlerResult{
 		Players: pds,
 	}
@@ -842,11 +901,12 @@ func playerDisqualifiedHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	playerID := c.Param("player_id")
 
@@ -880,6 +940,8 @@ func playerDisqualifiedHandler(c echo.Context) error {
 		}
 		return fmt.Errorf("error retrievePlayer: %w", err)
 	}
+
+	tenantDB.Commit()
 
 	res := PlayerDisqualifiedHandlerResult{
 		Player: PlayerDetail{
@@ -962,11 +1024,12 @@ func competitionsAddHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	title := c.FormValue("title")
 
@@ -986,6 +1049,9 @@ func competitionsAddHandler(c echo.Context) error {
 		)
 	}
 
+	tenantDB.Commit()
+
+	fmt.Printf("added tenant id %d, comp id %s, title %s\n", v.tenantID, id, title)
 	res := CompetitionsAddHandlerResult{
 		Competition: CompetitionDetail{
 			ID:         id,
@@ -1008,11 +1074,12 @@ func competitionFinishHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	id := c.Param("competition_id")
 	if id == "" {
@@ -1048,6 +1115,8 @@ func competitionFinishHandler(c echo.Context) error {
 		competitionFinishSlice = append(competitionFinishSlice, competitionFinishData{v.tenantID, id, time.Now().Unix()})
 		competitionFinishSliceMutex.Unlock()
 	}
+
+	tenantDB.Commit()
 
 	return c.JSON(http.StatusOK, SuccessResult{Status: true})
 }
@@ -1115,17 +1184,11 @@ func competitionScoreHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
-	if err != nil {
-		return err
-	}
-	defer tenantDB.Close()
-
 	competitionID := c.Param("competition_id")
 	if competitionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "competition_id required")
 	}
-	comp, err := retrieveCompetition(ctx, tenantDB, competitionID)
+	comp, err := retrieveCompetition(ctx, adminDB, competitionID)
 	if err != nil {
 		// 存在しない大会
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1160,12 +1223,19 @@ func competitionScoreHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid CSV headers")
 	}
 
-	// / DELETEしたタイミングで参照が来ると空っぽのランキングになるのでロックする
-	fl, err := flockByTenantID(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
-		return fmt.Errorf("error flockByTenantID: %w", err)
+		return err
 	}
-	defer fl.Close()
+	defer tenantDB.Rollback()
+
+	//// / DELETEしたタイミングで参照が来ると空っぽのランキングになるのでロックする
+	//fl, err := flockByTenantID(v.tenantID)
+	//if err != nil {
+	//	return fmt.Errorf("error flockByTenantID: %w", err)
+	//}
+	//defer fl.Close()
 	var rowNum int64
 	playerScoreRows := []PlayerScoreRow{}
 	for {
@@ -1237,6 +1307,8 @@ func competitionScoreHandler(c echo.Context) error {
 		}
 	}
 
+	tenantDB.Commit()
+
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
 		Data:   ScoreHandlerResult{Rows: int64(len(playerScoreRows))},
@@ -1260,11 +1332,12 @@ func billingHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	cs := []CompetitionRow{}
 	if err := tenantDB.SelectContext(
@@ -1283,6 +1356,8 @@ func billingHandler(c echo.Context) error {
 		}
 		tbrs = append(tbrs, *report)
 	}
+
+	tenantDB.Commit()
 
 	res := SuccessResult{
 		Status: true,
@@ -1317,11 +1392,12 @@ func playerHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role player required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	if err := authorizePlayer(ctx, tenantDB, v.playerID); err != nil {
 		return err
@@ -1348,12 +1424,12 @@ func playerHandler(c echo.Context) error {
 		return fmt.Errorf("error Select competition: %w", err)
 	}
 
-	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
-	fl, err := flockByTenantID(v.tenantID)
-	if err != nil {
-		return fmt.Errorf("error flockByTenantID: %w", err)
-	}
-	defer fl.Close()
+	//// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
+	//fl, err := flockByTenantID(v.tenantID)
+	//if err != nil {
+	//	return fmt.Errorf("error flockByTenantID: %w", err)
+	//}
+	//defer fl.Close()
 	pss := make([]PlayerScoreRow, 0, len(cs))
 	for _, c := range cs {
 		ps := PlayerScoreRow{}
@@ -1386,6 +1462,8 @@ func playerHandler(c echo.Context) error {
 			Score:            ps.Score,
 		})
 	}
+
+	tenantDB.Commit()
 
 	res := SuccessResult{
 		Status: true,
@@ -1427,11 +1505,12 @@ func competitionRankingHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role player required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	defer tenantDB.Rollback()
 
 	if err := authorizePlayer(ctx, tenantDB, v.playerID); err != nil {
 		return err
@@ -1441,6 +1520,7 @@ func competitionRankingHandler(c echo.Context) error {
 	if competitionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "competition_id is required")
 	}
+	fmt.Printf("get tenant id %d, comp id %s\n", v.tenantID, competitionID)
 
 	// 大会の存在確認
 	competition, err := retrieveCompetition(ctx, tenantDB, competitionID)
@@ -1476,12 +1556,12 @@ func competitionRankingHandler(c echo.Context) error {
 		}
 	}
 
-	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
-	fl, err := flockByTenantID(v.tenantID)
-	if err != nil {
-		return fmt.Errorf("error flockByTenantID: %w", err)
-	}
-	defer fl.Close()
+	//// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
+	//fl, err := flockByTenantID(v.tenantID)
+	//if err != nil {
+	//	return fmt.Errorf("error flockByTenantID: %w", err)
+	//}
+	//defer fl.Close()
 	pss := []PlayerScoreRow{}
 	if err := tenantDB.SelectContext(
 		ctx,
@@ -1492,6 +1572,7 @@ func competitionRankingHandler(c echo.Context) error {
 	); err != nil {
 		return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
 	}
+	fmt.Printf("tenant %s, competition_id %s, player_socre count %d\n", tenantDBName(v.tenantID), competitionID, len(pss))
 	ranks := make([]CompetitionRank, 0, len(pss))
 	scoredPlayerSet := make(map[string]struct{}, len(pss))
 	for _, ps := range pss {
@@ -1534,6 +1615,8 @@ func competitionRankingHandler(c echo.Context) error {
 		}
 	}
 
+	tenantDB.Commit()
+
 	res := SuccessResult{
 		Status: true,
 		Data: CompetitionRankingHandlerResult{
@@ -1566,16 +1649,18 @@ func playerCompetitionsHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role player required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
-	if err != nil {
-		return err
-	}
-	defer tenantDB.Close()
+	////tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := adminDB.BeginTxx(ctx, nil)
+	//if err != nil {
+	//	return err
+	//}
+	//defer tenantDB.Rollback()
 
-	if err := authorizePlayer(ctx, tenantDB, v.playerID); err != nil {
+	if err := authorizePlayer(ctx, adminDB, v.playerID); err != nil {
 		return err
 	}
-	return competitionsHandler(c, v, tenantDB)
+	//tenantDB.Commit()
+	return competitionsHandler(c, v, adminDB)
 }
 
 // テナント管理者向けAPI
@@ -1590,13 +1675,16 @@ func organizerCompetitionsHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "role organizer required")
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
-	if err != nil {
-		return err
-	}
-	defer tenantDB.Close()
+	////tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := adminDB.Beginx()
+	//if err != nil {
+	//	return err
+	//}
+	//defer tenantDB.Rollback()
 
-	return competitionsHandler(c, v, tenantDB)
+	//tenantDB.Commit()
+
+	return competitionsHandler(c, v, adminDB)
 }
 
 func competitionsHandler(c echo.Context, v *Viewer, tenantDB dbOrTx) error {
@@ -1681,10 +1769,12 @@ func meHandler(c echo.Context) error {
 		})
 	}
 
-	tenantDB, err := connectToTenantDB(v.tenantID)
+	//tenantDB, err := connectToTenantDB(v.tenantID)
+	tenantDB, err := adminDB.Beginx()
 	if err != nil {
 		return fmt.Errorf("error connectToTenantDB: %w", err)
 	}
+	defer tenantDB.Rollback()
 	ctx := context.Background()
 	p, err := retrievePlayer(ctx, tenantDB, v.playerID)
 	if err != nil {
@@ -1701,6 +1791,8 @@ func meHandler(c echo.Context) error {
 		}
 		return fmt.Errorf("error retrievePlayer: %w", err)
 	}
+
+	tenantDB.Commit()
 
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
@@ -1733,18 +1825,5 @@ func initializeHandler(c echo.Context) error {
 	res := InitializeHandlerResult{
 		Lang: "go",
 	}
-
-	// pem から JWT パース用の鍵をアプリケーションで持つ.
-	// initialize の時間がかかるようならローカルからファイル読み込みしないようにする.
-	keyFilename := getEnv("ISUCON_JWT_KEY_FILE", "../public.pem")
-	keysrc, err := os.ReadFile(keyFilename)
-	if err != nil {
-		return fmt.Errorf("error os.ReadFile: keyFilename=%s: %w", keyFilename, err)
-	}
-	k, _, err := jwk.DecodePEM(keysrc)
-	if err != nil {
-		return fmt.Errorf("error jwk.DecodePEM: %w", err)
-	}
-	KeyForJWTParse = jwt.WithKey(jwa.RS256, k)
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
 }

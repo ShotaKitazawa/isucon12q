@@ -11,10 +11,25 @@ ISUCON_DB_NAME=${ISUCON_DB_NAME:-isuports}
 
 # MySQLを初期化
 mysql -u"$ISUCON_DB_USER" \
-		-p"$ISUCON_DB_PASSWORD" \
-		--host "$ISUCON_DB_HOST" \
-		--port "$ISUCON_DB_PORT" \
-		"$ISUCON_DB_NAME" < init.sql
+                -p"$ISUCON_DB_PASSWORD" \
+                --host "$ISUCON_DB_HOST" \
+                --port "$ISUCON_DB_PORT" \
+                "$ISUCON_DB_NAME" < init.sql
+
+#mysql -u"$ISUCON_DB_USER" \
+#                -p"$ISUCON_DB_PASSWORD" \
+#                --host "$ISUCON_DB_HOST" \
+#                --port "$ISUCON_DB_PORT" \
+#                -e "show databases" -s | egrep "^tenant_" | xargs -I "@@" mysql -u"$ISUCON_DB_USER" \
+#                -p"$ISUCON_DB_PASSWORD" \
+#                --host "$ISUCON_DB_HOST" \
+#                --port "$ISUCON_DB_PORT" \
+#                -e "DROP DATABASE @@"
+
+#mysql -u"$ISUCON_DB_USER" \
+#                -p"$ISUCON_DB_PASSWORD" \
+#                --host "$ISUCON_DB_HOST" \
+#                --port "$ISUCON_DB_PORT" < /home/isucon/tenant.dmp
 
 # add/remove index
 mysql -u"$ISUCON_DB_USER" -p"$ISUCON_DB_PASSWORD" --host "$ISUCON_DB_HOST" --port "$ISUCON_DB_PORT" "$ISUCON_DB_NAME" \
@@ -26,4 +41,4 @@ mysql -u"$ISUCON_DB_USER" -p"$ISUCON_DB_PASSWORD" --host "$ISUCON_DB_HOST" --por
 
 # SQLiteのデータベースを初期化
 rm -f ../tenant_db/*.db
-cp -r ../../initial_data/*.db ../tenant_db/
+#cp -r ../../initial_data/*.db ../tenant_db/
