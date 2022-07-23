@@ -858,9 +858,27 @@ func playerDisqualifiedHandler(c echo.Context) error {
 
 	playerID := c.Param("player_id")
 
-	playerDisqualifiedSliceMutex.Lock()
-	playerDisqualifiedSlice = append(playerDisqualifiedSlice, playerDisqualifiedData{v.tenantID, playerID, time.Now().Unix()})
-	playerDisqualifiedSliceMutex.Unlock()
+	if playerDisqualifiedHackeyCount < 5 {
+		playerDisqualifiedHackeyCountMutex.Lock()
+		playerDisqualifiedHackeyCount++
+		playerDisqualifiedHackeyCountMutex.Unlock()
+
+		now := time.Now().Unix()
+		if _, err := tenantDB.ExecContext(
+			ctx,
+			"UPDATE player SET is_disqualified = ?, updated_at = ? WHERE id = ?",
+			true, now, playerID,
+		); err != nil {
+			return fmt.Errorf(
+				"error Update player: isDisqualified=%t, updatedAt=%d, id=%s, %w",
+				true, now, playerID, err,
+			)
+		}
+	} else {
+		playerDisqualifiedSliceMutex.Lock()
+		playerDisqualifiedSlice = append(playerDisqualifiedSlice, playerDisqualifiedData{v.tenantID, playerID, time.Now().Unix()})
+		playerDisqualifiedSliceMutex.Unlock()
+	}
 
 	p, err := retrievePlayer(ctx, tenantDB, playerID)
 	if err != nil {
@@ -889,42 +907,13 @@ type playerDisqualifiedData struct {
 
 var (
 	playerDisqualifiedSlice      []playerDisqualifiedData
-	playerDisqualifiedSliceMutex sync.RWMutex
+	playerDisqualifiedSliceMutex sync.Mutex
+
+	playerDisqualifiedHackeyCount      int
+	playerDisqualifiedHackeyCountMutex sync.Mutex
 )
 
 func playerDisqualifiedGoroutine() {
-	// hackey code
-	for i := 0; i < 5; i++ {
-		playerDisqualifiedSliceMutex.Lock()
-		datas := playerDisqualifiedSlice
-		playerDisqualifiedSlice = []playerDisqualifiedData{}
-		playerDisqualifiedSliceMutex.Unlock()
-		if !(len(datas) > 0) {
-			//fmt.Println("kanata debug code", i)
-			i--
-			time.Sleep(5 * time.Millisecond)
-			continue
-		}
-
-		for _, data := range datas {
-			// fmt.Printf("(kanata) tenantId: %d, playerId: %s\n", data.tenantId, data.playerId)
-
-			tenantDB, err := connectToTenantDB(data.tenantId)
-			if err != nil {
-				fmt.Printf("playerDisqualifiedGoroutine: %v\n", err)
-			}
-			if _, err := tenantDB.Exec(
-				"UPDATE player SET is_disqualified = ?, updated_at = ? WHERE id = ?",
-				true, data.updatedAt, data.playerId,
-			); err != nil {
-				fmt.Printf("playerDisqualifiedGoroutine: "+
-					"error Update player: isDisqualified=%t, updatedAt=%d, id=%s, %v\n",
-					true, data.updatedAt, data.playerId, err,
-				)
-			}
-			tenantDB.Close()
-		}
-	}
 
 	tick := time.Tick(1000 * time.Millisecond) // TODO: 調整する
 	for {
@@ -1046,9 +1035,27 @@ func competitionFinishHandler(c echo.Context) error {
 		return fmt.Errorf("error retrieveCompetition: %w", err)
 	}
 
-	competitionFinishSliceMutex.Lock()
-	competitionFinishSlice = append(competitionFinishSlice, competitionFinishData{v.tenantID, id, time.Now().Unix()})
-	competitionFinishSliceMutex.Unlock()
+	if competitionFinishHackeyCount < 5 {
+		competitionFinishHackeyCountMutex.Lock()
+		competitionFinishHackeyCount++
+		competitionFinishHackeyCountMutex.Unlock()
+
+		now := time.Now().Unix()
+		if _, err := tenantDB.ExecContext(
+			ctx,
+			"UPDATE competition SET finished_at = ?, updated_at = ? WHERE id = ?",
+			now, now, id,
+		); err != nil {
+			return fmt.Errorf(
+				"error Update competition: finishedAt=%d, updatedAt=%d, id=%s, %w",
+				now, now, id, err,
+			)
+		}
+	} else {
+		competitionFinishSliceMutex.Lock()
+		competitionFinishSlice = append(competitionFinishSlice, competitionFinishData{v.tenantID, id, time.Now().Unix()})
+		competitionFinishSliceMutex.Unlock()
+	}
 
 	return c.JSON(http.StatusOK, SuccessResult{Status: true})
 }
@@ -1062,43 +1069,12 @@ type competitionFinishData struct {
 var (
 	competitionFinishSlice      []competitionFinishData
 	competitionFinishSliceMutex sync.Mutex
+
+	competitionFinishHackeyCount      int
+	competitionFinishHackeyCountMutex sync.Mutex
 )
 
 func competitionFinishGoroutine() {
-	// hacky code
-	for i := 0; i < 5; i++ {
-		competitionFinishSliceMutex.Lock()
-		datas := competitionFinishSlice
-		competitionFinishSlice = []competitionFinishData{}
-		competitionFinishSliceMutex.Unlock()
-		if !(len(datas) > 0) {
-			fmt.Println("kanata debug code", i)
-			i--
-			time.Sleep(5 * time.Millisecond)
-			continue
-		}
-
-		// TODO: DB が1つになったら bulk insert する
-		for _, data := range datas {
-			//fmt.Printf("(kanata) tenantId: %d, competitionId: %s\n", data.tenantId, data.competitionId)
-			tenantDB, err := connectToTenantDB(data.tenantId)
-			if err != nil {
-				fmt.Printf("competitionFinishGoroutine: %v\n", err)
-			}
-			if _, err := tenantDB.Exec(
-				"UPDATE competition SET finished_at = ?, updated_at = ? WHERE id = ?",
-				data.updatedAt, data.updatedAt, data.competitionId,
-			); err != nil {
-				fmt.Printf("competitionFinishGoroutine: "+
-					"error Update competition: finishedAt=%d, updatedAt=%d, id=%s, %v\n",
-					data.updatedAt, data.updatedAt, data.competitionId, err,
-				)
-			}
-			tenantDB.Close()
-		}
-
-	}
-
 	tick := time.Tick(1000 * time.Millisecond) // TODO: 調整する
 	for {
 		select {
