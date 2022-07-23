@@ -1,6 +1,6 @@
 #!/bin/sh
 
-set -ex
+set -x
 cd `dirname $0`
 
 ISUCON_DB_HOST=${ISUCON_DB_HOST:-127.0.0.1}
