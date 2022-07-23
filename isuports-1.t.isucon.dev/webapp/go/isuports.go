@@ -85,10 +85,21 @@ func tenantDBName(id int64) string {
 	return fmt.Sprintf("tenant_%d", id)
 }
 
+var tenantDBMap = make(map[int64]*sqlx.DB)
+
 // テナントDBに接続する
 func connectToTenantDB(id int64) (*sqlx.DB, error) {
+	v, ok := tenantDBMap[id]
+	if ok {
+		return v, nil
+	}
 	dbname := tenantDBName(id)
-	return connectMySQL(dbname)
+	vv, err := connectMySQL(dbname)
+	if err != nil {
+		return nil, err
+	}
+	tenantDBMap[id] = vv
+	return vv
 }
 
 //func connectToTenantDB(id int64) (*sqlx.DB, error) {
