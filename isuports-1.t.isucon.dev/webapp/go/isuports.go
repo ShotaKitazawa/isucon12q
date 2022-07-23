@@ -1029,7 +1029,7 @@ var (
 )
 
 func competitionFinishGoroutine() {
-	tick := time.Tick(100 * time.Millisecond) // TODO: 調整する
+	tick := time.Tick(1 * time.Millisecond) // TODO: 調整する
 	for {
 		select {
 		case <-tick:
