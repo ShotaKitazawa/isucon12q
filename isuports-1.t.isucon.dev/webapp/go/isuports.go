@@ -892,7 +892,7 @@ var (
 )
 
 func playerDisqualifiedGoroutine() {
-	tick := time.Tick(1 * time.Millisecond)
+	tick := time.Tick(1 * time.Millisecond) // TODO: 調整する
 	for {
 		select {
 		case <-tick:
@@ -901,10 +901,8 @@ func playerDisqualifiedGoroutine() {
 			playerDisqualifiedSlice = []playerDisqualifiedData{}
 			playerDisqualifiedSliceMutex.Unlock()
 
+			// TODO: DB が1つになったら bulk insert する
 			for _, data := range datas {
-				// for debug
-				fmt.Println(data.tenantId, data.playerId)
-
 				tenantDB, err := connectToTenantDB(data.tenantId)
 				if err != nil {
 					fmt.Printf("playerDisqualifiedGoroutine: %v\n", err)
